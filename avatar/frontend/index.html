@@ -30,6 +30,22 @@
             </div>
             <div id="upload-preview" class="upload-preview hidden">
                 <img id="preview-img" alt="プレビュー">
+                <div class="mode-selector">
+                    <label class="mode-option selected" data-mode="full">
+                        <input type="radio" name="decompose-mode" value="full" checked>
+                        <div class="mode-card">
+                            <div class="mode-title">フル分解</div>
+                            <div class="mode-desc">顔・髪・体・衣装すべてをパーツ分解</div>
+                        </div>
+                    </label>
+                    <label class="mode-option" data-mode="costume_only">
+                        <input type="radio" name="decompose-mode" value="costume_only">
+                        <div class="mode-card">
+                            <div class="mode-title">衣装のみ抽出</div>
+                            <div class="mode-desc">上着・下着・袖・靴などの衣装パーツだけを抽出</div>
+                        </div>
+                    </label>
+                </div>
                 <div class="upload-actions">
                     <button id="decompose-btn" class="btn btn-primary">パーツ分解を開始</button>
                     <button id="reset-btn" class="btn btn-secondary">別の画像を選択</button>

@@ -29,6 +29,7 @@ class SessionData:
     original_filename: str = ""
     image_width: int = 0
     image_height: int = 0
+    mode: str = "full"  # "full" = all parts, "costume_only" = clothing extraction only
     status: str = "uploaded"  # uploaded -> processing -> done -> error
     parts: list[PartData] = field(default_factory=list)
     error_message: str = ""

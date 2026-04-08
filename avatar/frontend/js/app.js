@@ -6,6 +6,7 @@ const App = {
     sessionId: null,
     parts: [],
     selectedPartId: null,
+    decomposeMode: 'full',
 
     init() {
         Uploader.init();
@@ -16,6 +17,15 @@ const App = {
         document.getElementById('reset-btn').addEventListener('click', () => this.reset());
         document.getElementById('export-btn').addEventListener('click', () => this.exportPackage());
         document.getElementById('back-to-upload').addEventListener('click', () => this.showStep('upload'));
+
+        // Mode selector
+        document.querySelectorAll('.mode-option').forEach(el => {
+            el.addEventListener('click', () => {
+                document.querySelectorAll('.mode-option').forEach(o => o.classList.remove('selected'));
+                el.classList.add('selected');
+                this.decomposeMode = el.dataset.mode;
+            });
+        });
     },
 
     showStep(step) {
@@ -34,10 +44,21 @@ const App = {
     async startDecompose() {
         if (!this.sessionId) return;
 
+        // Update loading text based on mode
+        const loadingText = document.querySelector('.loading-text');
+        const loadingHint = document.querySelector('.loading-hint');
+        if (this.decomposeMode === 'costume_only') {
+            loadingText.textContent = '衣装を抽出中...';
+            loadingHint.textContent = 'AIが衣装パーツを分離しています';
+        } else {
+            loadingText.textContent = 'パーツを分解中...';
+            loadingHint.textContent = 'AIが画像を解析してパーツに分離しています';
+        }
+
         this.showStep('loading');
 
         try {
-            const res = await fetch(`/api/decompose/${this.sessionId}`, { method: 'POST' });
+            const res = await fetch(`/api/decompose/${this.sessionId}?mode=${this.decomposeMode}`, { method: 'POST' });
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.detail || '分解に失敗しました');

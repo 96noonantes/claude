@@ -18,20 +18,25 @@ def _get_session_lock(session_id: str) -> threading.Lock:
 
 
 @router.post("/decompose/{session_id}")
-async def decompose_image(session_id: str):
+async def decompose_image(session_id: str, mode: str = "full"):
     session = get_session(session_id)
     if not session:
         raise HTTPException(404, "セッションが見つかりません")
     if session.status == "processing":
         raise HTTPException(409, "処理中です")
+    if mode not in ("full", "costume_only"):
+        raise HTTPException(400, "モードは 'full' または 'costume_only' を指定してください")
 
+    session.mode = mode
     session.status = "processing"
+    session.error_message = ""
+    session.parts = []
     session.save()
 
     loop = asyncio.get_running_loop()
     loop.run_in_executor(None, _decompose_sync, session_id)
 
-    return {"status": "processing", "session_id": session_id}
+    return {"status": "processing", "session_id": session_id, "mode": mode}
 
 
 def _decompose_sync(session_id: str):
@@ -42,7 +47,7 @@ def _decompose_sync(session_id: str):
         if not session:
             return
         try:
-            parts = run_decomposition(session.original_image_path, session.parts_dir)
+            parts = run_decomposition(session.original_image_path, session.parts_dir, mode=session.mode)
             session.parts = parts
             session.status = "done"
         except Exception as e:

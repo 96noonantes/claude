@@ -57,6 +57,14 @@ PART_DEFINITIONS = [
     PartLabel("hair_side_left", "左横髪", 19),
     PartLabel("hair_side_right", "右横髪", 20),
     PartLabel("accessory", "アクセサリー", 21),
+    # Costume-only mode labels
+    PartLabel("collar", "襟・ネックウェア", 5),
+    PartLabel("sleeve_left", "左袖", 5),
+    PartLabel("sleeve_right", "右袖", 6),
+    PartLabel("legwear", "レッグウェア", 3),
+    PartLabel("footwear", "靴", 2),
+    PartLabel("headwear", "帽子・頭飾り", 22),
+    PartLabel("costume_full", "衣装（全体）", 4),
 ]
 
 LABEL_MAP = {p.id: p for p in PART_DEFINITIONS}
