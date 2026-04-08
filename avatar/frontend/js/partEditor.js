@@ -1,0 +1,152 @@
+/**
+ * Part editor - displays decomposed parts list and canvas overlay
+ */
+
+const PartEditor = {
+    showOverlay: true,
+    showOriginal: false,
+    partImages: {},
+
+    init() {
+        document.getElementById('toggle-overlay').addEventListener('click', () => {
+            this.showOverlay = !this.showOverlay;
+            this.drawCanvas();
+        });
+
+        document.getElementById('toggle-original').addEventListener('click', () => {
+            this.showOriginal = !this.showOriginal;
+            this.drawCanvas();
+        });
+    },
+
+    renderParts(parts) {
+        const list = document.getElementById('parts-list');
+        list.innerHTML = '';
+
+        for (const part of parts) {
+            const item = document.createElement('div');
+            item.className = `part-item${part.id === App.selectedPartId ? ' selected' : ''}${!part.visible ? ' hidden-part' : ''}`;
+
+            item.innerHTML = `
+                <img class="part-thumbnail" src="${part.image_url}" alt="${part.label_ja}">
+                <div class="part-info">
+                    <div class="part-label">${part.label_ja}</div>
+                    <div class="part-label-en">${part.label}</div>
+                </div>
+                <button class="part-toggle ${part.visible ? 'visible' : ''}" data-part-id="${part.id}" title="${part.visible ? '非表示にする' : '表示する'}">
+                    ${part.visible ? eyeOpenSVG : eyeClosedSVG}
+                </button>
+            `;
+
+            item.addEventListener('click', (e) => {
+                if (!e.target.closest('.part-toggle')) {
+                    App.selectPart(part.id);
+                }
+            });
+
+            const toggleBtn = item.querySelector('.part-toggle');
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                App.togglePartVisibility(part.id);
+            });
+
+            list.appendChild(item);
+        }
+
+        this.loadPartImages(parts);
+    },
+
+    async loadPartImages(parts) {
+        const promises = parts.map(part => {
+            if (this.partImages[part.id]) return Promise.resolve();
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    this.partImages[part.id] = img;
+                    resolve();
+                };
+                img.onerror = resolve;
+                img.src = part.image_url;
+            });
+        });
+
+        await Promise.all(promises);
+        this.drawCanvas();
+    },
+
+    drawCanvas() {
+        const canvas = document.getElementById('editor-canvas');
+        const ctx = canvas.getContext('2d');
+
+        if (App.parts.length === 0) return;
+
+        const firstPart = App.parts[0];
+        const maxX = Math.max(...App.parts.map(p => p.bounds.x + p.bounds.width));
+        const maxY = Math.max(...App.parts.map(p => p.bounds.y + p.bounds.height));
+        canvas.width = maxX + 20;
+        canvas.height = maxY + 20;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw original image if toggled
+        if (this.showOriginal && App.sessionId) {
+            const origImg = new Image();
+            origImg.onload = () => {
+                canvas.width = origImg.width;
+                canvas.height = origImg.height;
+                ctx.drawImage(origImg, 0, 0);
+                if (this.showOverlay) this._drawOverlay(ctx);
+            };
+            origImg.src = `/workspace/${App.sessionId}/original.png`;
+            return;
+        }
+
+        // Draw parts in depth order
+        const sorted = [...App.parts].sort((a, b) => a.depth_order - b.depth_order);
+        for (const part of sorted) {
+            if (!part.visible) continue;
+            const img = this.partImages[part.id];
+            if (!img) continue;
+            ctx.drawImage(img, part.bounds.x, part.bounds.y, part.bounds.width, part.bounds.height);
+        }
+
+        if (this.showOverlay) this._drawOverlay(ctx);
+    },
+
+    _drawOverlay(ctx) {
+        const colors = [
+            'rgba(99,102,241,0.3)', 'rgba(244,114,182,0.3)', 'rgba(52,211,153,0.3)',
+            'rgba(251,191,36,0.3)', 'rgba(248,113,113,0.3)', 'rgba(96,165,250,0.3)',
+            'rgba(167,139,250,0.3)', 'rgba(45,212,191,0.3)', 'rgba(251,146,60,0.3)',
+        ];
+
+        App.parts.forEach((part, i) => {
+            if (!part.visible) return;
+            const { x, y, width, height } = part.bounds;
+            const isSelected = part.id === App.selectedPartId;
+
+            ctx.fillStyle = colors[i % colors.length];
+            ctx.fillRect(x, y, width, height);
+
+            ctx.strokeStyle = isSelected ? '#6366f1' : 'rgba(255,255,255,0.4)';
+            ctx.lineWidth = isSelected ? 2 : 1;
+            ctx.strokeRect(x, y, width, height);
+
+            ctx.fillStyle = isSelected ? '#6366f1' : 'rgba(0,0,0,0.6)';
+            ctx.fillRect(x, y, Math.min(width, 100), 18);
+            ctx.fillStyle = '#fff';
+            ctx.font = '11px sans-serif';
+            ctx.fillText(part.label_ja, x + 3, y + 13);
+        });
+    },
+};
+
+const eyeOpenSVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+    <circle cx="12" cy="12" r="3"/>
+</svg>`;
+
+const eyeClosedSVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+    <line x1="1" y1="1" x2="23" y2="23"/>
+</svg>`;

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live2D アバター生成ツール</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <h1>Live2D アバター生成ツール</h1>
+        <p class="subtitle">一枚の画像からLive2Dパーツを自動分解</p>
+    </header>
+
+    <main>
+        <!-- Step 1: Upload -->
+        <section id="upload-section" class="step active">
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-zone-content">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <p class="drop-text">画像をドラッグ&ドロップ、またはクリップボードからペースト</p>
+                    <p class="drop-hint">PNG / JPG / WebP（最大10MB）</p>
+                    <button id="file-select-btn" class="btn btn-primary">ファイルを選択</button>
+                    <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.webp" hidden>
+                </div>
+            </div>
+            <div id="upload-preview" class="upload-preview hidden">
+                <img id="preview-img" alt="プレビュー">
+                <div class="upload-actions">
+                    <button id="decompose-btn" class="btn btn-primary">パーツ分解を開始</button>
+                    <button id="reset-btn" class="btn btn-secondary">別の画像を選択</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Loading -->
+        <section id="loading-section" class="step hidden">
+            <div class="loading-container">
+                <div class="spinner"></div>
+                <p class="loading-text">パーツを分解中...</p>
+                <p class="loading-hint">AIが画像を解析してパーツに分離しています</p>
+            </div>
+        </section>
+
+        <!-- Step 2: Part Editor -->
+        <section id="editor-section" class="step hidden">
+            <div class="editor-layout">
+                <div class="editor-canvas-container">
+                    <canvas id="editor-canvas"></canvas>
+                    <div class="canvas-controls">
+                        <button id="toggle-overlay" class="btn btn-small">オーバーレイ切替</button>
+                        <button id="toggle-original" class="btn btn-small">元画像表示</button>
+                    </div>
+                </div>
+                <div class="parts-panel">
+                    <h3>検出パーツ一覧</h3>
+                    <div id="parts-list" class="parts-list"></div>
+                    <div class="export-actions">
+                        <button id="export-btn" class="btn btn-primary btn-large">
+                            Cubism Editor用にエクスポート
+                        </button>
+                        <button id="back-to-upload" class="btn btn-secondary">戻る</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/uploader.js"></script>
+    <script src="/static/js/partEditor.js"></script>
+    <script src="/static/js/preview.js"></script>
+</body>
+</html>
