@@ -15,6 +15,7 @@ from app.models.session import PartData
 from app.pipeline.preprocessing import load_and_normalize, remove_background
 from app.pipeline.face_detector import detect_anime_face
 from app.pipeline.region_segmenter import segment_parts
+from app.pipeline.inpainter import inpaint_occluded_parts
 from app.pipeline.part_labels import get_label_ja, get_depth_order
 
 
@@ -51,6 +52,9 @@ def _run_full(image_rgba: np.ndarray, no_bg: np.ndarray, output_dir: Path) -> li
     parts = segment_parts(image_rgba, no_bg, landmarks, output_dir)
     if not parts:
         raise ValueError("パーツの分解に失敗しました。画像を確認してください。")
+
+    # Post-process: inpaint occluded regions so each part is complete
+    parts = inpaint_occluded_parts(no_bg, parts, output_dir)
 
     return parts
 
