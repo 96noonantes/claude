@@ -17,7 +17,24 @@ const App = {
         document.getElementById('decompose-btn').addEventListener('click', () => this.startDecompose());
         document.getElementById('reset-btn').addEventListener('click', () => this.reset());
         document.getElementById('export-btn').addEventListener('click', () => this.exportPackage());
+        document.getElementById('export-btn-preview').addEventListener('click', () => this.exportPackage());
         document.getElementById('back-to-upload').addEventListener('click', () => this.showStep('upload'));
+
+        // View tabs (Editor / Live Preview)
+        document.querySelectorAll('.view-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const view = tab.dataset.view;
+                document.getElementById('editor-view').classList.toggle('hidden', view !== 'editor');
+                document.getElementById('preview-view').classList.toggle('hidden', view !== 'preview');
+                if (view === 'preview') {
+                    Preview.start(this.parts);
+                } else {
+                    Preview.stop();
+                }
+            });
+        });
 
         // Gender filter
         document.querySelectorAll('.filter-btn').forEach(btn => {

@@ -62,33 +62,101 @@
             </div>
         </section>
 
-        <!-- Step 2: Part Editor -->
+        <!-- Step 2: Part Editor + Live Preview -->
         <section id="editor-section" class="step hidden">
-            <div class="editor-layout">
-                <div class="editor-canvas-container">
-                    <canvas id="editor-canvas"></canvas>
-                    <div class="canvas-controls">
-                        <button id="toggle-overlay" class="btn btn-small">オーバーレイ切替</button>
-                        <button id="toggle-original" class="btn btn-small">元画像表示</button>
+            <div class="view-tabs">
+                <button class="view-tab active" data-view="editor">パーツ編集</button>
+                <button class="view-tab" data-view="preview">ライブプレビュー</button>
+            </div>
+
+            <!-- Editor View -->
+            <div id="editor-view" class="view-content">
+                <div class="editor-layout">
+                    <div class="editor-canvas-container">
+                        <canvas id="editor-canvas"></canvas>
+                        <div class="canvas-controls">
+                            <button id="toggle-overlay" class="btn btn-small">オーバーレイ切替</button>
+                            <button id="toggle-original" class="btn btn-small">元画像表示</button>
+                        </div>
+                    </div>
+                    <div class="parts-panel">
+                        <div class="panel-header">
+                            <h3>検出パーツ一覧</h3>
+                            <div id="gender-badge" class="gender-badge hidden"></div>
+                        </div>
+                        <div class="filter-bar">
+                            <button class="filter-btn active" data-filter="all">すべて</button>
+                            <button class="filter-btn" data-filter="female">♀ 女性用</button>
+                            <button class="filter-btn" data-filter="male">♂ 男性用</button>
+                            <button class="filter-btn" data-filter="unisex">⚥ 共用</button>
+                        </div>
+                        <div id="parts-list" class="parts-list"></div>
+                        <div class="export-actions">
+                            <button id="export-btn" class="btn btn-primary btn-large">
+                                Cubism Editor用にエクスポート
+                            </button>
+                            <button id="back-to-upload" class="btn btn-secondary">戻る</button>
+                        </div>
                     </div>
                 </div>
-                <div class="parts-panel">
-                    <div class="panel-header">
-                        <h3>検出パーツ一覧</h3>
-                        <div id="gender-badge" class="gender-badge hidden"></div>
+            </div>
+
+            <!-- Live Preview View -->
+            <div id="preview-view" class="view-content hidden">
+                <div class="preview-layout">
+                    <div class="preview-canvas-container">
+                        <canvas id="preview-canvas"></canvas>
                     </div>
-                    <div class="filter-bar">
-                        <button class="filter-btn active" data-filter="all">すべて</button>
-                        <button class="filter-btn" data-filter="female">♀ 女性用</button>
-                        <button class="filter-btn" data-filter="male">♂ 男性用</button>
-                        <button class="filter-btn" data-filter="unisex">⚥ 共用</button>
-                    </div>
-                    <div id="parts-list" class="parts-list"></div>
-                    <div class="export-actions">
-                        <button id="export-btn" class="btn btn-primary btn-large">
-                            Cubism Editor用にエクスポート
-                        </button>
-                        <button id="back-to-upload" class="btn btn-secondary">戻る</button>
+                    <div class="preview-controls">
+                        <h3>アニメーション設定</h3>
+                        <div class="anim-control">
+                            <label>まばたき</label>
+                            <input type="checkbox" id="anim-blink" checked>
+                        </div>
+                        <div class="anim-control">
+                            <label>呼吸</label>
+                            <input type="checkbox" id="anim-breath" checked>
+                        </div>
+                        <div class="anim-control">
+                            <label>頭の揺れ</label>
+                            <input type="checkbox" id="anim-head-sway" checked>
+                        </div>
+                        <div class="anim-control">
+                            <label>髪揺れ</label>
+                            <input type="checkbox" id="anim-hair" checked>
+                        </div>
+                        <div class="anim-control">
+                            <label>スカート揺れ</label>
+                            <input type="checkbox" id="anim-skirt" checked>
+                        </div>
+                        <div class="anim-control">
+                            <label>マウス追従</label>
+                            <input type="checkbox" id="anim-mouse-track" checked>
+                        </div>
+                        <div class="anim-control">
+                            <label>口パクデモ</label>
+                            <input type="checkbox" id="anim-lip-sync">
+                        </div>
+                        <hr class="control-divider">
+                        <div class="anim-control">
+                            <label>表情</label>
+                            <select id="expression-select">
+                                <option value="neutral">通常</option>
+                                <option value="happy">喜び</option>
+                                <option value="sad">悲しみ</option>
+                                <option value="angry">怒り</option>
+                                <option value="surprised">驚き</option>
+                                <option value="embarrassed">照れ</option>
+                                <option value="wink_left">ウインク（左）</option>
+                                <option value="sleepy">眠い</option>
+                                <option value="smug">ドヤ顔</option>
+                            </select>
+                        </div>
+                        <div class="export-actions" style="margin-top:1rem">
+                            <button id="export-btn-preview" class="btn btn-primary btn-large">
+                                Cubism Editor用にエクスポート
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -100,6 +168,7 @@
     <script src="/static/js/app.js"></script>
     <script src="/static/js/uploader.js"></script>
     <script src="/static/js/partEditor.js"></script>
+    <script src="/static/js/animationEngine.js"></script>
     <script src="/static/js/preview.js"></script>
 </body>
 </html>
