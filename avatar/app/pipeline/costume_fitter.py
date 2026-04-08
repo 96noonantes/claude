@@ -4,11 +4,6 @@ When a costume designed for body A is worn on body B, each part is scaled
 and repositioned to match B's proportions.
 """
 
-import cv2
-import numpy as np
-from PIL import Image
-from pathlib import Path
-
 from app.models.session import BodyProfile, PartData
 
 
@@ -16,7 +11,6 @@ def fit_costume_to_body(
     parts: list[PartData],
     source_profile: BodyProfile,
     target_profile: BodyProfile,
-    parts_dir: Path | None = None,
 ) -> list[PartData]:
     """Transform costume parts from source body to target body.
 
@@ -57,8 +51,8 @@ def _transform_part(
     target: BodyProfile,
 ) -> PartData:
     """Transform a single part's coordinates to a new body profile."""
-    import copy
-    new = copy.deepcopy(part)
+    from copy import deepcopy
+    new = deepcopy(part)
 
     if not part.fit_points:
         # No fit points: use simple proportional scaling

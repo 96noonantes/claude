@@ -96,7 +96,7 @@ def analyze_body(
     # --- Hair color (median of hair parts) ---
     hair_labels = {"hair_front", "hair_back", "hair_side_left", "hair_side_right"}
     hair_pixels = _collect_part_pixels(no_bg, parts, hair_labels)
-    if len(hair_pixels) > 50:
+    if hair_pixels.shape[0] > 50:
         profile.hair_color = [int(np.median(hair_pixels[:, c])) for c in range(3)]
 
     # --- Skin color (from face region) ---
@@ -177,4 +177,4 @@ def _collect_part_pixels(no_bg: np.ndarray, parts: list[PartData], labels: set) 
             all_pixels.append(region[mask][:, :3])
     if all_pixels:
         return np.concatenate(all_pixels)
-    return np.array([])
+    return np.empty((0, 3), dtype=np.uint8)

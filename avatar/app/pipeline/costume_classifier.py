@@ -186,8 +186,8 @@ def _classify_top(
     part_alpha = part_img[:, :, 3] > 30
     ph, pw = part_alpha.shape
 
-    bx, by = part.bounds["x"], part.bounds["y"]
-    bh = part.bounds["height"]
+    bx, by = part.bounds.get("x", 0), part.bounds.get("y", 0)
+    bh = part.bounds.get("height", 0)
 
     h, w = no_bg.shape[:2]
 

@@ -20,7 +20,7 @@ const BodyEditor = {
         for (const { id, key } of sliders) {
             const el = document.getElementById(id);
             const valEl = document.getElementById(`${id}-val`);
-            if (!el) continue;
+            if (!el || !valEl) continue;
             el.addEventListener('input', () => {
                 const val = parseFloat(el.value);
                 valEl.textContent = val.toFixed(2);

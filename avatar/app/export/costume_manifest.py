@@ -1,7 +1,6 @@
 """Generate costume.json manifest for cross-avatar dress-up compatibility."""
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 
 from app.models.session import SessionData

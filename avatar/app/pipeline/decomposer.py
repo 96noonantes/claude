@@ -139,7 +139,7 @@ def _run_costume_only(image_rgba: np.ndarray, no_bg: np.ndarray, output_dir: Pat
 
         part_counter += 1
         return PartData(
-            id=f"part_{part_counter:03d}",
+            id=label,  # stable ID = label (deduplicated by _assign_stable_ids)
             label=label,
             label_ja=get_label_ja(label),
             bounds={"x": int(x1), "y": int(y1), "width": int(x2 - x1), "height": int(y2 - y1)},
