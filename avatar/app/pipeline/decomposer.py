@@ -16,6 +16,8 @@ from app.pipeline.preprocessing import load_and_normalize, remove_background
 from app.pipeline.face_detector import detect_anime_face
 from app.pipeline.region_segmenter import segment_parts
 from app.pipeline.inpainter import inpaint_occluded_parts
+from app.pipeline.gender_detector import detect_gender
+from app.pipeline.costume_classifier import classify_costume_parts
 from app.pipeline.part_labels import get_label_ja, get_depth_order
 
 
@@ -55,6 +57,10 @@ def _run_full(image_rgba: np.ndarray, no_bg: np.ndarray, output_dir: Path) -> li
 
     # Post-process: inpaint occluded regions so each part is complete
     parts = inpaint_occluded_parts(no_bg, parts, output_dir)
+
+    # Classify gender and costume categories
+    gender_result = detect_gender(no_bg, landmarks)
+    parts = classify_costume_parts(parts, gender_result, no_bg, landmarks, output_dir)
 
     return parts
 
@@ -241,6 +247,11 @@ def _run_costume_only(image_rgba: np.ndarray, no_bg: np.ndarray, output_dir: Pat
         raise ValueError("衣装パーツの抽出に失敗しました。")
 
     parts.sort(key=lambda p: p.depth_order)
+
+    # Classify gender and costume categories
+    gender_result = detect_gender(no_bg, landmarks)
+    parts = classify_costume_parts(parts, gender_result, no_bg, landmarks, output_dir)
+
     return parts
 
 

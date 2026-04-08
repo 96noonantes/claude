@@ -73,7 +73,16 @@
                     </div>
                 </div>
                 <div class="parts-panel">
-                    <h3>検出パーツ一覧</h3>
+                    <div class="panel-header">
+                        <h3>検出パーツ一覧</h3>
+                        <div id="gender-badge" class="gender-badge hidden"></div>
+                    </div>
+                    <div class="filter-bar">
+                        <button class="filter-btn active" data-filter="all">すべて</button>
+                        <button class="filter-btn" data-filter="female">♀ 女性用</button>
+                        <button class="filter-btn" data-filter="male">♂ 男性用</button>
+                        <button class="filter-btn" data-filter="unisex">⚥ 共用</button>
+                    </div>
                     <div id="parts-list" class="parts-list"></div>
                     <div class="export-actions">
                         <button id="export-btn" class="btn btn-primary btn-large">

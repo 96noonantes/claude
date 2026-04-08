@@ -23,15 +23,38 @@ const PartEditor = {
         const list = document.getElementById('parts-list');
         list.innerHTML = '';
 
-        for (const part of parts) {
+        // Show detected gender badge
+        const genderBadge = document.getElementById('gender-badge');
+        const genders = parts.map(p => p.gender).filter(g => g && g !== 'unisex');
+        if (genders.length > 0) {
+            const majorGender = genders.filter(g => g === 'female').length >= genders.filter(g => g === 'male').length ? 'female' : 'male';
+            genderBadge.textContent = majorGender === 'female' ? '♀ 女性キャラ' : '♂ 男性キャラ';
+            genderBadge.className = `gender-badge ${majorGender}`;
+            genderBadge.classList.remove('hidden');
+        } else {
+            genderBadge.classList.add('hidden');
+        }
+
+        // Filter parts by gender
+        const filter = App.genderFilter;
+        const filteredParts = filter === 'all' ? parts : parts.filter(p =>
+            p.gender === filter || p.gender === 'unisex' || !p.gender
+        );
+
+        for (const part of filteredParts) {
             const item = document.createElement('div');
             item.className = `part-item${part.id === App.selectedPartId ? ' selected' : ''}${!part.visible ? ' hidden-part' : ''}`;
+
+            const categoryBadge = part.category ? `<span class="category-badge">${_categoryName(part.category)}</span>` : '';
+            const genderTag = part.gender && part.gender !== 'unisex'
+                ? `<span class="gender-tag ${part.gender}">${part.gender === 'female' ? '♀' : '♂'}</span>`
+                : part.gender === 'unisex' ? `<span class="gender-tag unisex">⚥</span>` : '';
 
             item.innerHTML = `
                 <img class="part-thumbnail" src="${part.image_url}" alt="${part.label_ja}">
                 <div class="part-info">
                     <div class="part-label">${part.label_ja}</div>
-                    <div class="part-label-en">${part.label}</div>
+                    <div class="part-badges">${categoryBadge}${genderTag}</div>
                 </div>
                 <button class="part-toggle ${part.visible ? 'visible' : ''}" data-part-id="${part.id}" title="${part.visible ? '非表示にする' : '表示する'}">
                     ${part.visible ? eyeOpenSVG : eyeClosedSVG}
@@ -144,6 +167,19 @@ const PartEditor = {
         });
     },
 };
+
+const CATEGORY_NAMES = {
+    hair: '髪', body: '体', face: '顔', limb: '四肢',
+    tops: 'トップス', bottoms_skirt: 'スカート', bottoms_pants: 'パンツ',
+    one_piece: 'ワンピース', outer: 'アウター',
+    underwear_top: '下着(上)', underwear_bottom: '下着(下)',
+    socks: '靴下', shoes: '靴', hat: '帽子', collar: '襟',
+    gloves: '手袋', sleeve: '袖', accessory: 'アクセサリー', costume: '衣装',
+};
+
+function _categoryName(cat) {
+    return CATEGORY_NAMES[cat] || cat;
+}
 
 const eyeOpenSVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>

@@ -7,6 +7,7 @@ const App = {
     parts: [],
     selectedPartId: null,
     decomposeMode: 'full',
+    genderFilter: 'all',  // 'all', 'male', 'female', 'unisex'
 
     init() {
         Uploader.init();
@@ -17,6 +18,16 @@ const App = {
         document.getElementById('reset-btn').addEventListener('click', () => this.reset());
         document.getElementById('export-btn').addEventListener('click', () => this.exportPackage());
         document.getElementById('back-to-upload').addEventListener('click', () => this.showStep('upload'));
+
+        // Gender filter
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.genderFilter = btn.dataset.filter;
+                PartEditor.renderParts(this.parts);
+            });
+        });
 
         // Mode selector
         document.querySelectorAll('.mode-option').forEach(el => {

@@ -18,6 +18,8 @@ class PartData:
     depth_order: int
     visible: bool = True
     image_filename: str = ""
+    category: str = ""       # clothing category (tops, bottoms_skirt, etc.)
+    gender: str = "unisex"   # male / female / unisex
 
     def image_path(self, session_dir: Path) -> Path:
         return session_dir / "parts" / self.image_filename
