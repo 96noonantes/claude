@@ -636,51 +636,48 @@ def _segment_arm_joints(
         fingers[:finger_y, :] = False
     else:
         # Horizontal arm: split by X coordinates
+        # upper_arm = near body, fingers = at extremity
+        # Proportions along arm length: upper 40%, forearm 30%, hand 18%, fingers 12%
         if side == "left":
-            # Left arm extends to the left
+            # Left arm extends to the LEFT: body on right, fingertips on left
+            # x_right = body side, x_left = fingertip side
+            elbow_x = x_right - int(arm_w * 0.40)
+            wrist_x = x_right - int(arm_w * 0.70)
+            finger_x = x_right - int(arm_w * 0.88)
+
+            upper = arm_mask.copy()
+            upper[:, :elbow_x] = False  # keep body side (right)
+
+            forearm = arm_mask.copy()
+            forearm[:, elbow_x:] = False
+            forearm[:, :wrist_x] = False
+
+            hand = arm_mask.copy()
+            hand[:, wrist_x:] = False
+            hand[:, :finger_x] = False
+
+            fingers = arm_mask.copy()
+            fingers[:, finger_x:] = False
+        else:
+            # Right arm extends to the RIGHT: body on left, fingertips on right
+            # x_left = body side, x_right = fingertip side
             elbow_x = x_left + int(arm_w * 0.40)
             wrist_x = x_left + int(arm_w * 0.70)
             finger_x = x_left + int(arm_w * 0.88)
 
             upper = arm_mask.copy()
-            upper[:, :elbow_x] = False  # keep right part (near body)
+            upper[:, elbow_x:] = False  # keep body side (left)
 
             forearm = arm_mask.copy()
-            forearm[:, elbow_x:] = False
-            forearm[:, :wrist_x] = False
-            # Actually for left arm going left: upper near body (right), hand far (left)
-            upper = arm_mask.copy()
-            upper[:, :(x_right - int(arm_w * 0.40))] = False
-
-            forearm = arm_mask.copy()
-            forearm[:, (x_right - int(arm_w * 0.40)):] = False
-            forearm[:, :(x_right - int(arm_w * 0.70))] = False
+            forearm[:, :elbow_x] = False
+            forearm[:, wrist_x:] = False
 
             hand = arm_mask.copy()
-            hand[:, (x_right - int(arm_w * 0.70)):] = False
-            hand[:, :(x_right - int(arm_w * 0.88)):] = False
+            hand[:, :wrist_x] = False
+            hand[:, finger_x:] = False
 
             fingers = arm_mask.copy()
-            fingers[:, (x_right - int(arm_w * 0.88)):] = False
-        else:
-            # Right arm extends to the right
-            elbow_x = x_left + int(arm_w * 0.60)
-            wrist_x = x_left + int(arm_w * 0.30)
-            finger_x = x_left + int(arm_w * 0.12)
-
-            upper = arm_mask.copy()
-            upper[:, elbow_x:] = False
-
-            forearm = arm_mask.copy()
-            forearm[:, :wrist_x] = False
-            forearm[:, elbow_x:] = False
-
-            hand = arm_mask.copy()
-            hand[:, :finger_x] = False
-            hand[:, wrist_x:] = False
-
-            fingers = arm_mask.copy()
-            fingers[:, finger_x:] = False
+            fingers[:, :finger_x] = False
 
     # Validate: use width narrowing to refine joint positions
     # The wrist/fingers tend to be narrower than upper arm

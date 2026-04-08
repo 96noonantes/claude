@@ -7,21 +7,27 @@ Improvements:
 - Fallback to birefnet-general if isnet-anime fails
 """
 
+import threading
+
 import numpy as np
 from PIL import Image
 
 from app.config import TARGET_IMAGE_DIMENSION
 
+_rembg_lock = threading.Lock()
 _rembg_session = None
+_rembg_model_name = None
 
 
 def _get_rembg_session(model_name: str = "isnet-anime"):
-    """Get or create a cached rembg session."""
-    global _rembg_session
-    if _rembg_session is None:
-        from rembg import new_session
-        _rembg_session = new_session(model_name)
-    return _rembg_session
+    """Get or create a cached rembg session (thread-safe)."""
+    global _rembg_session, _rembg_model_name
+    with _rembg_lock:
+        if _rembg_session is None or _rembg_model_name != model_name:
+            from rembg import new_session
+            _rembg_session = new_session(model_name)
+            _rembg_model_name = model_name
+        return _rembg_session
 
 
 def load_and_normalize(image_path) -> np.ndarray:
@@ -69,20 +75,18 @@ def remove_background(image_rgba: np.ndarray) -> np.ndarray:
     fg_ratio = np.sum(result_arr[:, :, 3] > 128) / (result_arr.shape[0] * result_arr.shape[1])
     if fg_ratio < 0.05:
         # Retry with birefnet-general
-        global _rembg_session
-        from rembg import new_session
-        _rembg_session = new_session("birefnet-general")
+        fallback_session = _get_rembg_session("birefnet-general")
         result = remove(
             img,
-            session=_rembg_session,
+            session=fallback_session,
             alpha_matting=True,
             alpha_matting_foreground_threshold=fg_threshold,
             alpha_matting_background_threshold=bg_threshold,
             post_process_mask=True,
         )
         result_arr = np.array(result)
-        # Reset session for next call
-        _rembg_session = None
+        # Restore primary session for next call
+        _get_rembg_session("isnet-anime")
 
     return result_arr
 

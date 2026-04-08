@@ -54,6 +54,9 @@ def _write_psd(path: Path, width: int, height: int, layers: list[dict]) -> None:
 
         # --- Layer and Mask Information ---
         layer_section = _build_layer_section(width, height, layers)
+        # PSD spec requires layer section length to be even-padded
+        if len(layer_section) % 2 != 0:
+            layer_section += b'\x00'
         f.write(struct.pack(">I", len(layer_section)))
         f.write(layer_section)
 
@@ -124,7 +127,10 @@ def _build_layer_info(width: int, height: int, layers: list[dict]) -> bytes:
         data += struct.pack(">B", 0)  # Flags
         data += struct.pack(">B", 0)  # Filler
 
-        name_bytes = layer["name"].encode("utf-8")
+        # PSD Pascal string uses MacRoman encoding; use ASCII-safe label
+        name_bytes = layer["name"].encode("ascii", errors="replace")
+        if len(name_bytes) > 255:
+            name_bytes = name_bytes[:255]
         padded_name_len = len(name_bytes) + 1
         padded_name_len = ((padded_name_len + 3) // 4) * 4
         extra_data = struct.pack(">B", len(name_bytes)) + name_bytes

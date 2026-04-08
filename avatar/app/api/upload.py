@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
@@ -19,23 +20,29 @@ async def upload_image(file: UploadFile = File(...)):
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(400, f"ファイルサイズが大きすぎます（最大{MAX_UPLOAD_SIZE // 1024 // 1024}MB）")
 
-    session = create_session()
-
-    image_path = session.original_image_path
-    image_path.write_bytes(content)
-
+    # Validate image from memory BEFORE creating session (avoid orphaned sessions)
     try:
-        with Image.open(image_path) as img:
-            if img.width > MAX_IMAGE_DIMENSION or img.height > MAX_IMAGE_DIMENSION:
-                raise HTTPException(400, f"画像サイズが大きすぎます（最大{MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION}px）")
-            session.image_width = img.width
-            session.image_height = img.height
-            img.save(image_path, "PNG")
+        img = Image.open(io.BytesIO(content))
+        if img.width > MAX_IMAGE_DIMENSION or img.height > MAX_IMAGE_DIMENSION:
+            raise HTTPException(400, f"画像サイズが大きすぎます（最大{MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION}px）")
+        img_width = img.width
+        img_height = img.height
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(400, "画像ファイルを読み込めませんでした")
 
+    # Image is valid — now create session and save
+    session = create_session()
+    image_path = session.original_image_path
+
+    img = Image.open(io.BytesIO(content))
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    img.save(image_path, "PNG")
+
+    session.image_width = img_width
+    session.image_height = img_height
     session.original_filename = file.filename or "image.png"
     session.status = "uploaded"
     session.save()

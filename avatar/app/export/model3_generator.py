@@ -565,11 +565,11 @@ def _generate_blink_motion(path: Path) -> None:
             {
                 "Target": "Parameter", "Id": "ParamEyeLOpen",
                 # Linear: 1→0 (close), then 0→1 (open)
-                "Segments": [0, 0.0, 1.0, 0, 0.05, 1.0, 1, 0.15, 0.0, 1, 0.2, 0.0, 1, 0.35, 1.0, 0, 0.4, 1.0],
+                "Segments": [0, 0.0, 1.0, 0, 0.05, 1.0, 0, 0.15, 0.0, 0, 0.2, 0.0, 0, 0.35, 1.0, 0, 0.4, 1.0],
             },
             {
                 "Target": "Parameter", "Id": "ParamEyeROpen",
-                "Segments": [0, 0.0, 1.0, 0, 0.05, 1.0, 1, 0.15, 0.0, 1, 0.2, 0.0, 1, 0.35, 1.0, 0, 0.4, 1.0],
+                "Segments": [0, 0.0, 1.0, 0, 0.05, 1.0, 0, 0.15, 0.0, 0, 0.2, 0.0, 0, 0.35, 1.0, 0, 0.4, 1.0],
             },
         ],
     }
@@ -581,11 +581,11 @@ def _generate_blink_motion(path: Path) -> None:
 def _make_sine_segments(duration: float, amplitude: float, period: float,
                          offset: float = 0.0, min_val: float = -999.0,
                          steps: int = 16) -> list:
-    """Generate Bezier curve segments approximating a sine wave.
+    """Generate linear curve segments approximating a sine wave.
 
     Returns CubismSpecs motion segment format:
     [type, time, value, type, time, value, ...]
-    type 0 = linear, type 1 = bezier
+    type 0 = linear segment
     """
     import math
     segments = []
@@ -595,9 +595,6 @@ def _make_sine_segments(duration: float, amplitude: float, period: float,
         if min_val > -999:
             val = max(min_val, val)
 
-        if i == 0:
-            segments.extend([0, t, val])
-        else:
-            segments.extend([1, t, val])
+        segments.extend([0, round(t, 4), round(val, 4)])
 
     return segments

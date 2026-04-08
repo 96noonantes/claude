@@ -1,4 +1,5 @@
 import asyncio
+import threading
 
 from fastapi import APIRouter, HTTPException
 
@@ -6,6 +7,14 @@ from app.models.session import get_session
 from app.pipeline.decomposer import run_decomposition
 
 router = APIRouter()
+
+_session_locks: dict[str, threading.Lock] = {}
+
+
+def _get_session_lock(session_id: str) -> threading.Lock:
+    if session_id not in _session_locks:
+        _session_locks[session_id] = threading.Lock()
+    return _session_locks[session_id]
 
 
 @router.post("/decompose/{session_id}")
@@ -19,24 +28,27 @@ async def decompose_image(session_id: str):
     session.status = "processing"
     session.save()
 
-    asyncio.get_event_loop().run_in_executor(None, _decompose_sync, session_id)
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, _decompose_sync, session_id)
 
     return {"status": "processing", "session_id": session_id}
 
 
 def _decompose_sync(session_id: str):
-    from app.models.session import get_session as _get
-    session = _get(session_id)
-    if not session:
-        return
-    try:
-        parts = run_decomposition(session.original_image_path, session.parts_dir)
-        session.parts = parts
-        session.status = "done"
-    except Exception as e:
-        session.status = "error"
-        session.error_message = str(e)
-    session.save()
+    lock = _get_session_lock(session_id)
+    with lock:
+        from app.models.session import get_session as _get
+        session = _get(session_id)
+        if not session:
+            return
+        try:
+            parts = run_decomposition(session.original_image_path, session.parts_dir)
+            session.parts = parts
+            session.status = "done"
+        except Exception as e:
+            session.status = "error"
+            session.error_message = str(e)
+        session.save()
 
 
 @router.get("/status/{session_id}")
