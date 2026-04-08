@@ -333,53 +333,180 @@ def generate_expression_files(output_dir: Path) -> None:
             json.dump(exp3, f, ensure_ascii=False, indent=2)
 
 
-def generate_physics3_json(output_path: Path) -> None:
-    """Generate physics3.json for hair and accessory physics."""
+def generate_physics3_json(output_path: Path, session: SessionData | None = None) -> None:
+    """Generate physics3.json with dynamic physics for hair, clothing, and accessories.
+
+    Detects which parts exist and generates appropriate pendulum physics:
+    - Hair (front, side, back): light, responsive sway
+    - Skirt/lower outerwear: heavier, gravity-driven swing
+    - Upper outerwear loose parts: medium sway
+    - Accessories: light, fast oscillation
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    settings = []
+    dictionary = []
+    setting_id = 0
+
+    visible_labels = set()
+    if session:
+        visible_labels = {p.label for p in session.parts if p.visible}
+
+    # --- Hair physics ---
+    hair_configs = [
+        ("hair_front", "前髪揺れ", "ParamHairFront", 0.95, 0.8, 5.0, 3.0),
+        ("hair_back", "後ろ髪揺れ", "ParamHairBack", 0.90, 0.6, 8.0, 4.0),
+        ("hair_side_left", "左横髪揺れ", "ParamHairSideL", 0.92, 0.7, 6.0, 3.5),
+        ("hair_side_right", "右横髪揺れ", "ParamHairSideR", 0.92, 0.7, 6.0, 3.5),
+    ]
+
+    for label, name, param_id, mobility, delay, length, radius in hair_configs:
+        if not visible_labels or label in visible_labels:
+            setting_id += 1
+            sid = f"PhysicsSetting{setting_id}"
+            dictionary.append({"Id": sid, "Name": name})
+            settings.append(_make_pendulum_setting(
+                sid, param_id,
+                input_id="ParamAngleX", input_weight=100,
+                mobility=mobility, delay=delay,
+                length=length, radius=radius,
+                scale=0.5,
+            ))
+
+    # --- Clothing physics (skirt, loose outerwear) ---
+    # Skirt / lower outerwear: heavy pendulum, gravity-driven
+    if not visible_labels or "outerwear_lower" in visible_labels:
+        setting_id += 1
+        sid = f"PhysicsSetting{setting_id}"
+        dictionary.append({"Id": sid, "Name": "スカート揺れ（中央）"})
+        settings.append(_make_pendulum_setting(
+            sid, "ParamSkirtCenter",
+            input_id="ParamBodyAngleX", input_weight=100,
+            mobility=0.85, delay=0.5,
+            length=10.0, radius=5.0,
+            scale=0.6, acceleration=2.0,
+            # Multi-vertex chain for more natural cloth movement
+            extra_vertices=[
+                {"Position": {"X": 0.0, "Y": 5.0}, "Mobility": 0.88, "Delay": 0.6, "Acceleration": 1.8, "Radius": 4.0},
+                {"Position": {"X": 0.0, "Y": 10.0}, "Mobility": 0.82, "Delay": 0.4, "Acceleration": 2.0, "Radius": 5.0},
+            ],
+        ))
+
+        # Left/right skirt panels for more dynamic movement
+        for side_name, side_ja, param_suffix, reflect in [
+            ("left", "左", "L", False), ("right", "右", "R", True),
+        ]:
+            setting_id += 1
+            sid = f"PhysicsSetting{setting_id}"
+            dictionary.append({"Id": sid, "Name": f"スカート揺れ（{side_ja}）"})
+            settings.append(_make_pendulum_setting(
+                sid, f"ParamSkirt{param_suffix}",
+                input_id="ParamBodyAngleX", input_weight=80,
+                mobility=0.87, delay=0.55,
+                length=9.0, radius=4.5,
+                scale=0.5, acceleration=1.8,
+                reflect=reflect,
+                extra_vertices=[
+                    {"Position": {"X": 0.0, "Y": 9.0}, "Mobility": 0.83, "Delay": 0.45, "Acceleration": 1.9, "Radius": 4.5},
+                ],
+            ))
+
+    # Upper outerwear loose parts (jacket flaps, ribbons, collar, etc.)
+    if not visible_labels or "outerwear_upper" in visible_labels:
+        setting_id += 1
+        sid = f"PhysicsSetting{setting_id}"
+        dictionary.append({"Id": sid, "Name": "上着揺れ"})
+        settings.append(_make_pendulum_setting(
+            sid, "ParamOuterwearUpper",
+            input_id="ParamAngleX", input_weight=60,
+            mobility=0.9, delay=0.7,
+            length=4.0, radius=2.5,
+            scale=0.3,
+        ))
+
+    # --- Accessory physics ---
+    if not visible_labels or "accessory" in visible_labels:
+        setting_id += 1
+        sid = f"PhysicsSetting{setting_id}"
+        dictionary.append({"Id": sid, "Name": "アクセサリー揺れ"})
+        settings.append(_make_pendulum_setting(
+            sid, "ParamAccessory",
+            input_id="ParamAngleX", input_weight=50,
+            mobility=0.97, delay=0.9,
+            length=3.0, radius=2.0,
+            scale=0.4,
+        ))
+
+    # Count totals
+    total_input = sum(len(s["Input"]) for s in settings)
+    total_output = sum(len(s["Output"]) for s in settings)
+    total_vertices = sum(len(s["Vertices"]) for s in settings)
 
     physics = {
         "Version": 3,
         "Meta": {
-            "PhysicsSettingCount": 2,
-            "TotalInputCount": 2,
-            "TotalOutputCount": 2,
-            "VertexCount": 4,
+            "PhysicsSettingCount": len(settings),
+            "TotalInputCount": total_input,
+            "TotalOutputCount": total_output,
+            "VertexCount": total_vertices,
             "Fps": 30.0,
             "EffectiveForces": {
                 "Gravity": {"X": 0.0, "Y": -1.0},
                 "Wind": {"X": 0.0, "Y": 0.0},
             },
-            "PhysicsDictionary": [
-                {"Id": "PhysicsSetting1", "Name": "前髪揺れ"},
-                {"Id": "PhysicsSetting2", "Name": "横髪揺れ"},
-            ],
+            "PhysicsDictionary": dictionary,
         },
-        "PhysicsSettings": [
-            {
-                "Id": "PhysicsSetting1",
-                "Input": [{"Source": {"Target": "Parameter", "Id": "ParamAngleX"}, "Weight": 100, "Type": "X", "Reflect": False}],
-                "Output": [{"Destination": {"Target": "Parameter", "Id": "ParamHairFront"}, "VertexIndex": 1, "Scale": 0.5, "Weight": 100, "Type": "Angle", "Reflect": False}],
-                "Vertices": [
-                    {"Position": {"X": 0.0, "Y": 0.0}, "Mobility": 1.0, "Delay": 1.0, "Acceleration": 1.0, "Radius": 0.0},
-                    {"Position": {"X": 0.0, "Y": 5.0}, "Mobility": 0.95, "Delay": 0.8, "Acceleration": 1.5, "Radius": 3.0},
-                ],
-                "Normalization": {"Position": {"Minimum": -10.0, "Default": 0.0, "Maximum": 10.0}, "Angle": {"Minimum": -10.0, "Default": 0.0, "Maximum": 10.0}},
-            },
-            {
-                "Id": "PhysicsSetting2",
-                "Input": [{"Source": {"Target": "Parameter", "Id": "ParamAngleX"}, "Weight": 80, "Type": "X", "Reflect": False}],
-                "Output": [{"Destination": {"Target": "Parameter", "Id": "ParamHairSide"}, "VertexIndex": 1, "Scale": 0.4, "Weight": 100, "Type": "Angle", "Reflect": False}],
-                "Vertices": [
-                    {"Position": {"X": 0.0, "Y": 0.0}, "Mobility": 1.0, "Delay": 1.0, "Acceleration": 1.0, "Radius": 0.0},
-                    {"Position": {"X": 0.0, "Y": 6.0}, "Mobility": 0.9, "Delay": 0.7, "Acceleration": 1.3, "Radius": 3.5},
-                ],
-                "Normalization": {"Position": {"Minimum": -10.0, "Default": 0.0, "Maximum": 10.0}, "Angle": {"Minimum": -10.0, "Default": 0.0, "Maximum": 10.0}},
-            },
-        ],
+        "PhysicsSettings": settings,
     }
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(physics, f, ensure_ascii=False, indent=2)
+
+
+def _make_pendulum_setting(
+    setting_id: str,
+    output_param: str,
+    input_id: str = "ParamAngleX",
+    input_weight: int = 100,
+    mobility: float = 0.95,
+    delay: float = 0.8,
+    length: float = 5.0,
+    radius: float = 3.0,
+    scale: float = 0.5,
+    acceleration: float = 1.5,
+    reflect: bool = False,
+    extra_vertices: list | None = None,
+) -> dict:
+    """Create a single pendulum physics setting."""
+    vertices = [
+        {"Position": {"X": 0.0, "Y": 0.0}, "Mobility": 1.0, "Delay": 1.0, "Acceleration": 1.0, "Radius": 0.0},
+        {"Position": {"X": 0.0, "Y": length}, "Mobility": mobility, "Delay": delay, "Acceleration": acceleration, "Radius": radius},
+    ]
+    if extra_vertices:
+        vertices.extend(extra_vertices)
+
+    return {
+        "Id": setting_id,
+        "Input": [{
+            "Source": {"Target": "Parameter", "Id": input_id},
+            "Weight": input_weight,
+            "Type": "X",
+            "Reflect": reflect,
+        }],
+        "Output": [{
+            "Destination": {"Target": "Parameter", "Id": output_param},
+            "VertexIndex": 1,
+            "Scale": scale,
+            "Weight": 100,
+            "Type": "Angle",
+            "Reflect": reflect,
+        }],
+        "Vertices": vertices,
+        "Normalization": {
+            "Position": {"Minimum": -10.0, "Default": 0.0, "Maximum": 10.0},
+            "Angle": {"Minimum": -10.0, "Default": 0.0, "Maximum": 10.0},
+        },
+    }
 
 
 def generate_motion_files(motions_dir: Path) -> None:

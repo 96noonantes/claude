@@ -44,8 +44,8 @@ def build_export_package(session: SessionData) -> Path:
     # Generate model3.json + parameters.json
     generate_model3_json(session, build_dir / "model3.json")
 
-    # Generate physics3.json
-    generate_physics3_json(build_dir / "physics3.json")
+    # Generate physics3.json (dynamic: detects skirt, hair, accessories from parts)
+    generate_physics3_json(build_dir / "physics3.json", session)
 
     # Generate motions (idle, blink)
     generate_motion_files(build_dir / "motions")
