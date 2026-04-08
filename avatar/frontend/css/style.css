@@ -447,6 +447,30 @@ main {
     margin: 0.6rem 0;
 }
 
+.slider {
+    width: 80px;
+    height: 4px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.slider-val {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    min-width: 2.5em;
+    text-align: right;
+}
+
+.color-picker {
+    width: 32px;
+    height: 24px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0;
+    cursor: pointer;
+    background: none;
+}
+
 /* Editor Layout */
 .editor-layout {
     display: grid;

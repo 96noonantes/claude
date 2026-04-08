@@ -11,6 +11,7 @@ from app.export.model3_generator import (
     generate_motion_files,
     generate_expression_files,
 )
+from app.export.costume_manifest import generate_costume_manifest
 
 
 def build_export_package(session: SessionData) -> Path:
@@ -52,6 +53,9 @@ def build_export_package(session: SessionData) -> Path:
 
     # Generate expression presets (happy, sad, angry, surprised, etc.)
     generate_expression_files(build_dir / "expressions")
+
+    # Generate costume.json (dress-up compatibility manifest)
+    generate_costume_manifest(session, build_dir / "costume.json")
 
     # Create ZIP
     zip_path = export_dir / f"live2d_avatar_{session.session_id}"

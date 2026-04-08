@@ -47,8 +47,9 @@ def _decompose_sync(session_id: str):
         if not session:
             return
         try:
-            parts = run_decomposition(session.original_image_path, session.parts_dir, mode=session.mode)
+            parts, body_profile = run_decomposition(session.original_image_path, session.parts_dir, mode=session.mode)
             session.parts = parts
+            session.body_profile = body_profile
             session.status = "done"
         except Exception as e:
             session.status = "error"

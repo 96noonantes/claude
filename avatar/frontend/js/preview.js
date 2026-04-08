@@ -15,6 +15,9 @@ const Preview = {
     _parts: [],
     _canvasW: 0,
     _canvasH: 0,
+    bodyScales: { height: 1, shoulder: 1, waist: 1, hip: 1, leg: 1 },
+    hairColor: null,   // [R, G, B] or null
+    skinColor: null,
 
     init() {
         AnimEngine.init();
@@ -102,6 +105,9 @@ const Preview = {
             .filter(part => part.visible)
             .sort((a, b) => a.depth_order - b.depth_order);
 
+        // Body scale from sliders
+        const bs = this.bodyScales || { height: 1, shoulder: 1, waist: 1, hip: 1, leg: 1 };
+
         for (const part of sorted) {
             const img = this._sprites[part.label];
             if (!img) continue;
@@ -123,12 +129,42 @@ const Preview = {
             // Apply transform: translate to pivot, rotate, scale, translate back
             ctx.translate(cx + t.tx, cy + t.ty);
             ctx.rotate(t.rotation);
-            ctx.scale(t.sx, t.sy);
+            // Apply body scale: different regions use different scale factors
+            const bsX = this._getBodyScaleX(part, bs);
+            const bsY = bs.height;
+            ctx.scale(t.sx * bsX, t.sy * bsY);
             ctx.globalAlpha = t.alpha;
             ctx.drawImage(img, -bw / 2, -bh / 2, bw, bh);
 
             ctx.restore();
         }
+    },
+
+    /**
+     * Get horizontal body scale factor for a specific part.
+     */
+    _getBodyScaleX(part, bs) {
+        const cat = part.category || '';
+        const label = part.label || '';
+        // Upper body clothing / arms → shoulder scale
+        if (cat === 'tops' || cat === 'outer' || cat === 'sleeve' || cat === 'collar' ||
+            label.includes('upper_arm') || label.includes('forearm') ||
+            label === 'outerwear_upper' || label === 'body_skin' || label === 'body') {
+            return bs.shoulder;
+        }
+        // Lower body → hip scale
+        if (cat === 'bottoms_skirt' || cat === 'bottoms_pants' || cat === 'socks' ||
+            label === 'outerwear_lower' || label.includes('thigh') || label.includes('shin')) {
+            return bs.hip;
+        }
+        // Waist area
+        if (label === 'underwear' || cat === 'underwear_top' || cat === 'underwear_bottom') {
+            return bs.waist;
+        }
+        // Head/face → no horizontal scale
+        if (cat === 'face' || cat === 'hair') return 1.0;
+        // Default
+        return (bs.shoulder + bs.hip) / 2;
     },
 
     /**

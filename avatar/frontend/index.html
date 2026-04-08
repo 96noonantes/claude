@@ -152,6 +152,41 @@
                                 <option value="smug">ドヤ顔</option>
                             </select>
                         </div>
+                        <hr class="control-divider">
+                        <h3>体型調整</h3>
+                        <div class="anim-control">
+                            <label>身長</label>
+                            <input type="range" id="body-height" min="0.7" max="1.3" step="0.01" value="1.0" class="slider">
+                            <span id="body-height-val" class="slider-val">1.0</span>
+                        </div>
+                        <div class="anim-control">
+                            <label>肩幅</label>
+                            <input type="range" id="body-shoulder" min="0.7" max="1.3" step="0.01" value="1.0" class="slider">
+                            <span id="body-shoulder-val" class="slider-val">1.0</span>
+                        </div>
+                        <div class="anim-control">
+                            <label>ウエスト</label>
+                            <input type="range" id="body-waist" min="0.7" max="1.3" step="0.01" value="1.0" class="slider">
+                            <span id="body-waist-val" class="slider-val">1.0</span>
+                        </div>
+                        <div class="anim-control">
+                            <label>ヒップ</label>
+                            <input type="range" id="body-hip" min="0.7" max="1.3" step="0.01" value="1.0" class="slider">
+                            <span id="body-hip-val" class="slider-val">1.0</span>
+                        </div>
+                        <div class="anim-control">
+                            <label>脚長</label>
+                            <input type="range" id="body-leg" min="0.7" max="1.3" step="0.01" value="1.0" class="slider">
+                            <span id="body-leg-val" class="slider-val">1.0</span>
+                        </div>
+                        <div class="anim-control">
+                            <label>髪色</label>
+                            <input type="color" id="hair-color" value="#808080" class="color-picker">
+                        </div>
+                        <div class="anim-control">
+                            <label>肌色</label>
+                            <input type="color" id="skin-color" value="#f0d2b4" class="color-picker">
+                        </div>
                         <div class="export-actions" style="margin-top:1rem">
                             <button id="export-btn-preview" class="btn btn-primary btn-large">
                                 Cubism Editor用にエクスポート
@@ -170,5 +205,6 @@
     <script src="/static/js/partEditor.js"></script>
     <script src="/static/js/animationEngine.js"></script>
     <script src="/static/js/preview.js"></script>
+    <script src="/static/js/bodyEditor.js"></script>
 </body>
 </html>

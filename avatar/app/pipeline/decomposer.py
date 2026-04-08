@@ -11,40 +11,78 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from app.models.session import PartData
+from app.models.session import PartData, BodyProfile
 from app.pipeline.preprocessing import load_and_normalize, remove_background
 from app.pipeline.face_detector import detect_anime_face
 from app.pipeline.region_segmenter import segment_parts
 from app.pipeline.inpainter import inpaint_occluded_parts
 from app.pipeline.gender_detector import detect_gender
 from app.pipeline.costume_classifier import classify_costume_parts
+from app.pipeline.body_analyzer import analyze_body, normalize_part_bounds, compute_anchor
+from app.pipeline.fit_points import compute_fit_points
 from app.pipeline.part_labels import get_label_ja, get_depth_order
 
 
-def run_decomposition(image_path: Path, output_dir: Path, mode: str = "full") -> list[PartData]:
+def run_decomposition(
+    image_path: Path,
+    output_dir: Path,
+    mode: str = "full",
+) -> tuple[list[PartData], BodyProfile]:
     """Run decomposition pipeline.
 
-    Args:
-        image_path: Path to the input character image
-        output_dir: Directory to save extracted part images
-        mode: "full" for all parts, "costume_only" for clothing only
-
-    Returns list of PartData with detected parts.
+    Returns (parts, body_profile).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     image_rgba = load_and_normalize(image_path)
     no_bg = remove_background(image_rgba)
 
-    if mode == "costume_only":
-        return _run_costume_only(image_rgba, no_bg, output_dir)
-    else:
-        return _run_full(image_rgba, no_bg, output_dir)
-
-
-def _run_full(image_rgba: np.ndarray, no_bg: np.ndarray, output_dir: Path) -> list[PartData]:
-    """Full decomposition: face, hair, body, clothing, limbs."""
     landmarks = detect_anime_face(no_bg)
+
+    if mode == "costume_only":
+        parts = _run_costume_only(image_rgba, no_bg, output_dir)
+    else:
+        parts = _run_full(image_rgba, no_bg, output_dir, landmarks)
+
+    # --- Post-processing: body profile + normalize + fit points ---
+    body_profile = analyze_body(no_bg, landmarks, parts)
+
+    # Make IDs stable (label-based instead of sequential)
+    _assign_stable_ids(parts)
+
+    # Classify gender & categories (for both modes)
+    gender_result = detect_gender(no_bg, landmarks)
+    parts = classify_costume_parts(parts, gender_result, no_bg, landmarks, output_dir)
+
+    # Normalize coordinates and compute fit points
+    for part in parts:
+        part.normalized_bounds = normalize_part_bounds(part, body_profile)
+        part.anchor = compute_anchor(part, body_profile)
+        part.fit_points = compute_fit_points(part, body_profile)
+
+    return parts, body_profile
+
+
+def _assign_stable_ids(parts: list[PartData]) -> None:
+    """Assign stable IDs based on label. Handles duplicate labels with suffix."""
+    seen: dict[str, int] = {}
+    for part in parts:
+        label = part.label
+        if label in seen:
+            seen[label] += 1
+            part.id = f"{label}_{seen[label]}"
+        else:
+            seen[label] = 0
+            part.id = label
+
+
+def _run_full(
+    image_rgba: np.ndarray,
+    no_bg: np.ndarray,
+    output_dir: Path,
+    landmarks=None,
+) -> list[PartData]:
+    """Full decomposition: face, hair, body, clothing, limbs."""
     if landmarks is None:
         raise ValueError(
             "キャラクターの顔を検出できませんでした。"
@@ -57,10 +95,6 @@ def _run_full(image_rgba: np.ndarray, no_bg: np.ndarray, output_dir: Path) -> li
 
     # Post-process: inpaint occluded regions so each part is complete
     parts = inpaint_occluded_parts(no_bg, parts, output_dir)
-
-    # Classify gender and costume categories
-    gender_result = detect_gender(no_bg, landmarks)
-    parts = classify_costume_parts(parts, gender_result, no_bg, landmarks, output_dir)
 
     return parts
 
@@ -247,10 +281,6 @@ def _run_costume_only(image_rgba: np.ndarray, no_bg: np.ndarray, output_dir: Pat
         raise ValueError("衣装パーツの抽出に失敗しました。")
 
     parts.sort(key=lambda p: p.depth_order)
-
-    # Classify gender and costume categories
-    gender_result = detect_gender(no_bg, landmarks)
-    parts = classify_costume_parts(parts, gender_result, no_bg, landmarks, output_dir)
 
     return parts
 

@@ -13,6 +13,7 @@ const App = {
         Uploader.init();
         PartEditor.init();
         Preview.init();
+        BodyEditor.init();
 
         document.getElementById('decompose-btn').addEventListener('click', () => this.startDecompose());
         document.getElementById('reset-btn').addEventListener('click', () => this.reset());
@@ -110,6 +111,7 @@ const App = {
 
                 if (data.status === 'done') {
                     await this.loadParts();
+                    await BodyEditor.loadProfile();
                     this.showStep('editor');
                     this.showToast(`${this.parts.length}個のパーツを検出しました`, 'success');
                     return;

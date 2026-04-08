@@ -66,7 +66,7 @@ def segment_parts(
 
         part_counter += 1
         return PartData(
-            id=f"part_{part_counter:03d}",
+            id=label,  # stable ID = label (deduplicated later in decomposer)
             label=label,
             label_ja=get_label_ja(label),
             bounds={"x": int(x1), "y": int(y1), "width": int(x2 - x1), "height": int(y2 - y1)},
