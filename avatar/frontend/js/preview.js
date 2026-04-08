@@ -15,6 +15,7 @@ const Preview = {
     _parts: [],
     _canvasW: 0,
     _canvasH: 0,
+    _useWebGL: false,
     bodyScales: { height: 1, shoulder: 1, waist: 1, hip: 1, leg: 1 },
     hairColor: null,   // [R, G, B] or null
     skinColor: null,
@@ -26,28 +27,48 @@ const Preview = {
     /**
      * Start the live preview animation loop.
      */
-    start(parts) {
+    async start(parts) {
         this._parts = parts;
         this._canvas = document.getElementById('preview-canvas');
-        this._ctx = this._canvas.getContext('2d');
+        this._useWebGL = false;
 
-        // Compute canvas size from parts
-        let maxX = 0, maxY = 0;
-        for (const p of parts) {
-            maxX = Math.max(maxX, p.bounds.x + p.bounds.width);
-            maxY = Math.max(maxY, p.bounds.y + p.bounds.height);
+        // Try WebGL renderer first (for mesh deformation)
+        if (App.sessionId && typeof WebGLRenderer !== 'undefined' && WebGLRenderer.isSupported()) {
+            try {
+                const res = await fetch(`/api/runtime-data/${App.sessionId}`);
+                if (res.ok) {
+                    const runtimeData = await res.json();
+                    if (WebGLRenderer.init(this._canvas)) {
+                        const atlasUrl = `/workspace/${App.sessionId}/export/atlas.png`;
+                        await WebGLRenderer.loadModel(runtimeData, atlasUrl);
+                        this._useWebGL = true;
+                        this._canvasW = runtimeData.canvas.width;
+                        this._canvasH = runtimeData.canvas.height;
+                    }
+                }
+            } catch (e) {
+                console.warn('WebGL init failed, falling back to Canvas 2D:', e);
+            }
         }
-        this._canvasW = maxX + 20;
-        this._canvasH = maxY + 20;
-        this._canvas.width = this._canvasW;
-        this._canvas.height = this._canvasH;
 
-        // Load all part images
-        this._loadSprites(parts).then(() => {
-            this._running = true;
-            this._lastTime = performance.now();
-            this._tick();
-        });
+        // Fallback to Canvas 2D
+        if (!this._useWebGL) {
+            this._ctx = this._canvas.getContext('2d');
+            let maxX = 0, maxY = 0;
+            for (const p of parts) {
+                maxX = Math.max(maxX, p.bounds.x + p.bounds.width);
+                maxY = Math.max(maxY, p.bounds.y + p.bounds.height);
+            }
+            this._canvasW = maxX + 20;
+            this._canvasH = maxY + 20;
+            this._canvas.width = this._canvasW;
+            this._canvas.height = this._canvasH;
+            await this._loadSprites(parts);
+        }
+
+        this._running = true;
+        this._lastTime = performance.now();
+        this._tick();
     },
 
     stop() {
@@ -55,6 +76,10 @@ const Preview = {
         if (this._rafId) {
             cancelAnimationFrame(this._rafId);
             this._rafId = null;
+        }
+        if (this._useWebGL && typeof WebGLRenderer !== 'undefined') {
+            WebGLRenderer.dispose();
+            this._useWebGL = false;
         }
     },
 
@@ -89,7 +114,13 @@ const Preview = {
         this._lastTime = now;
 
         AnimEngine.update(dt);
-        this._render();
+
+        if (this._useWebGL) {
+            WebGLRenderer.updateParams(AnimEngine.params);
+            WebGLRenderer.render();
+        } else {
+            this._render();
+        }
 
         this._rafId = requestAnimationFrame(() => this._tick());
     },

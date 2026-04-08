@@ -1,5 +1,6 @@
-"""Build the final export ZIP package for Cubism Editor."""
+"""Build the final export ZIP package for Cubism Editor + PWA runtime."""
 
+import json
 import shutil
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from app.export.model3_generator import (
     generate_expression_files,
 )
 from app.export.costume_manifest import generate_costume_manifest
+from app.export.runtime_exporter import generate_runtime_data
 
 
 def build_export_package(session: SessionData) -> Path:
@@ -56,6 +58,12 @@ def build_export_package(session: SessionData) -> Path:
 
     # Generate costume.json (dress-up compatibility manifest)
     generate_costume_manifest(session, build_dir / "costume.json")
+
+    # Generate PWA runtime data (atlas.png + avatar_runtime.json)
+    runtime_data, atlas_image = generate_runtime_data(session)
+    atlas_image.save(build_dir / "atlas.png")
+    with open(build_dir / "avatar_runtime.json", "w", encoding="utf-8") as f:
+        json.dump(runtime_data, f, ensure_ascii=False)
 
     # Create ZIP
     zip_path = export_dir / f"live2d_avatar_{session.session_id}"
