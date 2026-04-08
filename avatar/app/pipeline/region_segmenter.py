@@ -223,25 +223,23 @@ def segment_parts(
             if p:
                 parts.append(p)
 
-        # Arms
-        if arm_left is not None:
-            p = _save_part("arm_left", arm_left)
-            if p:
-                parts.append(p)
-        if arm_right is not None:
-            p = _save_part("arm_right", arm_right)
-            if p:
-                parts.append(p)
+        # Arms → segmented into upper_arm / forearm / hand / fingers
+        for arm_mask_single, side in [(arm_left, "left"), (arm_right, "right")]:
+            if arm_mask_single is not None:
+                arm_segments = _segment_arm_joints(arm_mask_single, side)
+                for label, mask in arm_segments.items():
+                    p = _save_part(label, mask)
+                    if p:
+                        parts.append(p)
 
-        # Legs
-        if leg_left is not None:
-            p = _save_part("leg_left", leg_left)
-            if p:
-                parts.append(p)
-        if leg_right is not None:
-            p = _save_part("leg_right", leg_right)
-            if p:
-                parts.append(p)
+        # Legs → segmented into thigh / shin / foot
+        for leg_mask_single, side in [(leg_left, "left"), (leg_right, "right")]:
+            if leg_mask_single is not None:
+                leg_segments = _segment_leg_joints(leg_mask_single, side)
+                for label, mask in leg_segments.items():
+                    p = _save_part(label, mask)
+                    if p:
+                        parts.append(p)
     else:
         # Fallback: single body part
         arm_left, arm_right, body_core = _detect_arms(body_full_mask, landmarks, alpha_mask)
@@ -250,14 +248,14 @@ def segment_parts(
         if p:
             parts.append(p)
 
-        if arm_left is not None:
-            p = _save_part("arm_left", arm_left)
-            if p:
-                parts.append(p)
-        if arm_right is not None:
-            p = _save_part("arm_right", arm_right)
-            if p:
-                parts.append(p)
+        # Arms → segmented into upper_arm / forearm / hand / fingers
+        for arm_mask_single, side in [(arm_left, "left"), (arm_right, "right")]:
+            if arm_mask_single is not None:
+                arm_segments = _segment_arm_joints(arm_mask_single, side)
+                for label, mask in arm_segments.items():
+                    p = _save_part(label, mask)
+                    if p:
+                        parts.append(p)
 
     parts.sort(key=lambda p: p.depth_order)
     return parts
@@ -554,7 +552,6 @@ def _detect_arms(
 
     center_x = landmarks.face_center_x
 
-    # Define body core as the central 40% width region
     core_left = center_x - int(w * 0.15)
     core_right = center_x + int(w * 0.15)
     core_left = max(0, core_left)
@@ -562,7 +559,6 @@ def _detect_arms(
 
     body_core = body_mask.copy()
 
-    # Pixels outside the core that are part of body = potential arms
     arm_candidate = body_mask.copy()
     arm_candidate[:, core_left:core_right] = False
 
@@ -575,17 +571,335 @@ def _detect_arms(
     arm_right = arm_candidate.copy()
     arm_right[:, :center_x] = False
 
-    # Only return arms if they are substantial enough
     arm_left_result = arm_left if arm_left.sum() > 200 else None
     arm_right_result = arm_right if arm_right.sum() > 200 else None
 
-    # Body core = body minus detected arms
     if arm_left_result is not None:
         body_core = body_core & ~arm_left
     if arm_right_result is not None:
         body_core = body_core & ~arm_right
 
     return arm_left_result, arm_right_result, body_core
+
+
+def _segment_arm_joints(
+    arm_mask: np.ndarray,
+    side: str,
+) -> dict[str, np.ndarray]:
+    """Split an arm mask into upper_arm / forearm / hand / fingers.
+
+    Uses the vertical extent and width profile of the arm to estimate
+    joint positions (shoulder, elbow, wrist, fingertips).
+    The approach works for arms hanging down or extended to the side.
+    """
+    h, w = arm_mask.shape
+    segments: dict[str, np.ndarray] = {}
+
+    rows = np.any(arm_mask, axis=1)
+    cols = np.any(arm_mask, axis=0)
+    if not rows.any() or not cols.any():
+        return {f"arm_{side}": arm_mask}
+
+    y_top = int(np.argmax(rows))
+    y_bot = int(len(rows) - np.argmax(rows[::-1]))
+    x_left = int(np.argmax(cols))
+    x_right = int(len(cols) - np.argmax(cols[::-1]))
+
+    arm_h = y_bot - y_top
+    arm_w = x_right - x_left
+
+    if arm_h < 40 and arm_w < 40:
+        return {f"arm_{side}": arm_mask}
+
+    # Determine if the arm is primarily vertical or horizontal
+    is_vertical = arm_h > arm_w * 0.8
+
+    if is_vertical:
+        # Vertical arm: split by Y coordinates
+        # Proportions: upper_arm 40%, forearm 30%, hand 20%, fingers 10%
+        elbow_y = y_top + int(arm_h * 0.40)
+        wrist_y = y_top + int(arm_h * 0.70)
+        finger_y = y_top + int(arm_h * 0.88)
+
+        upper = arm_mask.copy()
+        upper[elbow_y:, :] = False
+
+        forearm = arm_mask.copy()
+        forearm[:elbow_y, :] = False
+        forearm[wrist_y:, :] = False
+
+        hand = arm_mask.copy()
+        hand[:wrist_y, :] = False
+        hand[finger_y:, :] = False
+
+        fingers = arm_mask.copy()
+        fingers[:finger_y, :] = False
+    else:
+        # Horizontal arm: split by X coordinates
+        if side == "left":
+            # Left arm extends to the left
+            elbow_x = x_left + int(arm_w * 0.40)
+            wrist_x = x_left + int(arm_w * 0.70)
+            finger_x = x_left + int(arm_w * 0.88)
+
+            upper = arm_mask.copy()
+            upper[:, :elbow_x] = False  # keep right part (near body)
+
+            forearm = arm_mask.copy()
+            forearm[:, elbow_x:] = False
+            forearm[:, :wrist_x] = False
+            # Actually for left arm going left: upper near body (right), hand far (left)
+            upper = arm_mask.copy()
+            upper[:, :(x_right - int(arm_w * 0.40))] = False
+
+            forearm = arm_mask.copy()
+            forearm[:, (x_right - int(arm_w * 0.40)):] = False
+            forearm[:, :(x_right - int(arm_w * 0.70))] = False
+
+            hand = arm_mask.copy()
+            hand[:, (x_right - int(arm_w * 0.70)):] = False
+            hand[:, :(x_right - int(arm_w * 0.88)):] = False
+
+            fingers = arm_mask.copy()
+            fingers[:, (x_right - int(arm_w * 0.88)):] = False
+        else:
+            # Right arm extends to the right
+            elbow_x = x_left + int(arm_w * 0.60)
+            wrist_x = x_left + int(arm_w * 0.30)
+            finger_x = x_left + int(arm_w * 0.12)
+
+            upper = arm_mask.copy()
+            upper[:, elbow_x:] = False
+
+            forearm = arm_mask.copy()
+            forearm[:, :wrist_x] = False
+            forearm[:, elbow_x:] = False
+
+            hand = arm_mask.copy()
+            hand[:, :finger_x] = False
+            hand[:, wrist_x:] = False
+
+            fingers = arm_mask.copy()
+            fingers[:, finger_x:] = False
+
+    # Validate: use width narrowing to refine joint positions
+    # The wrist/fingers tend to be narrower than upper arm
+    if is_vertical:
+        segments = _refine_vertical_joints(arm_mask, upper, forearm, hand, fingers, side, y_top, y_bot)
+    else:
+        # For horizontal, use the basic split
+        segments = {}
+        if upper.sum() > 100:
+            segments[f"upper_arm_{side}"] = upper
+        if forearm.sum() > 100:
+            segments[f"forearm_{side}"] = forearm
+        if hand.sum() > 50:
+            segments[f"hand_{side}"] = hand
+        if fingers.sum() > 30:
+            segments[f"fingers_{side}"] = fingers
+
+    if not segments:
+        return {f"arm_{side}": arm_mask}
+
+    return segments
+
+
+def _refine_vertical_joints(
+    arm_mask: np.ndarray,
+    upper: np.ndarray,
+    forearm: np.ndarray,
+    hand: np.ndarray,
+    fingers: np.ndarray,
+    side: str,
+    y_top: int,
+    y_bot: int,
+) -> dict[str, np.ndarray]:
+    """Refine vertical arm segmentation using width profile analysis.
+
+    The arm width typically narrows at joints (elbow, wrist).
+    We detect these narrowing points to place joints more accurately.
+    """
+    arm_h = y_bot - y_top
+    if arm_h < 30:
+        segments = {}
+        if upper.sum() > 100:
+            segments[f"upper_arm_{side}"] = upper
+        if forearm.sum() > 100:
+            segments[f"forearm_{side}"] = forearm
+        if hand.sum() > 50:
+            segments[f"hand_{side}"] = hand
+        if fingers.sum() > 30:
+            segments[f"fingers_{side}"] = fingers
+        return segments
+
+    # Compute width at each row
+    row_widths = np.sum(arm_mask[y_top:y_bot, :], axis=1).astype(float)
+
+    if len(row_widths) < 10:
+        segments = {}
+        if upper.sum() > 100:
+            segments[f"upper_arm_{side}"] = upper
+        if forearm.sum() > 100:
+            segments[f"forearm_{side}"] = forearm
+        return segments
+
+    # Smooth the width profile
+    kernel_size = max(3, len(row_widths) // 15)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    smoothed = cv2.GaussianBlur(row_widths.reshape(-1, 1), (1, kernel_size), 0).flatten()
+
+    # Find local minima (narrowing = joint)
+    minima = []
+    for i in range(2, len(smoothed) - 2):
+        if smoothed[i] < smoothed[i - 1] and smoothed[i] < smoothed[i + 1]:
+            if smoothed[i] < np.median(smoothed) * 0.9:  # Must be a real narrowing
+                minima.append(i)
+
+    segments = {}
+
+    if len(minima) >= 2:
+        # Two minima: elbow and wrist
+        elbow_rel = minima[0]
+        wrist_rel = minima[1]
+        elbow_y = y_top + elbow_rel
+        wrist_y = y_top + wrist_rel
+
+        # Find finger start: where width drops significantly near the bottom
+        finger_start = wrist_rel + int((y_bot - y_top - wrist_rel) * 0.6)
+        finger_y = y_top + finger_start
+
+        upper_m = arm_mask.copy()
+        upper_m[elbow_y:, :] = False
+
+        forearm_m = arm_mask.copy()
+        forearm_m[:elbow_y, :] = False
+        forearm_m[wrist_y:, :] = False
+
+        hand_m = arm_mask.copy()
+        hand_m[:wrist_y, :] = False
+        hand_m[finger_y:, :] = False
+
+        fingers_m = arm_mask.copy()
+        fingers_m[:finger_y, :] = False
+
+        if upper_m.sum() > 100:
+            segments[f"upper_arm_{side}"] = upper_m
+        if forearm_m.sum() > 100:
+            segments[f"forearm_{side}"] = forearm_m
+        if hand_m.sum() > 50:
+            segments[f"hand_{side}"] = hand_m
+        if fingers_m.sum() > 30:
+            segments[f"fingers_{side}"] = fingers_m
+
+    elif len(minima) == 1:
+        # One minimum: likely the elbow
+        elbow_y = y_top + minima[0]
+        wrist_y = y_top + int(arm_h * 0.72)
+        finger_y = y_top + int(arm_h * 0.88)
+
+        upper_m = arm_mask.copy()
+        upper_m[elbow_y:, :] = False
+
+        forearm_m = arm_mask.copy()
+        forearm_m[:elbow_y, :] = False
+        forearm_m[wrist_y:, :] = False
+
+        hand_m = arm_mask.copy()
+        hand_m[:wrist_y, :] = False
+        hand_m[finger_y:, :] = False
+
+        fingers_m = arm_mask.copy()
+        fingers_m[:finger_y, :] = False
+
+        if upper_m.sum() > 100:
+            segments[f"upper_arm_{side}"] = upper_m
+        if forearm_m.sum() > 100:
+            segments[f"forearm_{side}"] = forearm_m
+        if hand_m.sum() > 50:
+            segments[f"hand_{side}"] = hand_m
+        if fingers_m.sum() > 30:
+            segments[f"fingers_{side}"] = fingers_m
+    else:
+        # No clear joints found: use proportional split
+        if upper.sum() > 100:
+            segments[f"upper_arm_{side}"] = upper
+        if forearm.sum() > 100:
+            segments[f"forearm_{side}"] = forearm
+        if hand.sum() > 50:
+            segments[f"hand_{side}"] = hand
+        if fingers.sum() > 30:
+            segments[f"fingers_{side}"] = fingers
+
+    return segments
+
+
+def _segment_leg_joints(
+    leg_mask: np.ndarray,
+    side: str,
+) -> dict[str, np.ndarray]:
+    """Split a leg mask into thigh / shin / foot.
+
+    Uses width profile analysis: the knee is typically a narrowing point.
+    """
+    h, w = leg_mask.shape
+    segments: dict[str, np.ndarray] = {}
+
+    rows = np.any(leg_mask, axis=1)
+    if not rows.any():
+        return {f"leg_{side}": leg_mask}
+
+    y_top = int(np.argmax(rows))
+    y_bot = int(len(rows) - np.argmax(rows[::-1]))
+    leg_h = y_bot - y_top
+
+    if leg_h < 30:
+        return {f"leg_{side}": leg_mask}
+
+    # Width profile
+    row_widths = np.sum(leg_mask[y_top:y_bot, :], axis=1).astype(float)
+
+    # Smooth
+    kernel_size = max(3, len(row_widths) // 10)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    smoothed = cv2.GaussianBlur(row_widths.reshape(-1, 1), (1, kernel_size), 0).flatten()
+
+    # Find knee: local minimum in upper 40-70% region
+    search_start = int(len(smoothed) * 0.30)
+    search_end = int(len(smoothed) * 0.65)
+    search_region = smoothed[search_start:search_end]
+
+    knee_rel = search_start
+    if len(search_region) > 3:
+        knee_rel = search_start + int(np.argmin(search_region))
+
+    knee_y = y_top + knee_rel
+
+    # Ankle: 85% down the leg
+    ankle_y = y_top + int(leg_h * 0.85)
+
+    thigh = leg_mask.copy()
+    thigh[knee_y:, :] = False
+
+    shin = leg_mask.copy()
+    shin[:knee_y, :] = False
+    shin[ankle_y:, :] = False
+
+    foot = leg_mask.copy()
+    foot[:ankle_y, :] = False
+
+    if thigh.sum() > 100:
+        segments[f"thigh_{side}"] = thigh
+    if shin.sum() > 100:
+        segments[f"shin_{side}"] = shin
+    if foot.sum() > 50:
+        segments[f"foot_{side}"] = foot
+
+    if not segments:
+        return {f"leg_{side}": leg_mask}
+
+    return segments
 
 
 def _segment_clothing_layers(
