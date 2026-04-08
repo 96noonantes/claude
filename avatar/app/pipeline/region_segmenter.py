@@ -1,9 +1,20 @@
-"""Region-based part segmentation using face landmarks and image analysis."""
+"""Region-based part segmentation with improved accuracy.
+
+Improvements over v1:
+- K-means color clustering for hair detection (handles white/black/gradient hair)
+- GrabCut refinement for pixel-accurate part boundaries
+- Distance-transform-based adaptive feathering
+- Iris/eye-white separation via Otsu thresholding
+- Better body/arm detection
+"""
+
+import math
 
 import cv2
 import numpy as np
 from PIL import Image
 from pathlib import Path
+from scipy import ndimage
 
 from app.pipeline.face_detector import FaceLandmarks
 from app.pipeline.part_labels import get_label_ja, get_depth_order
@@ -18,7 +29,8 @@ def segment_parts(
 ) -> list[PartData]:
     """Segment image into parts based on face landmarks."""
     h, w = image_rgba.shape[:2]
-    alpha_mask = no_bg[:, :, 3] > 128  # Character mask
+    alpha_mask = no_bg[:, :, 3] > 128
+    rgb = no_bg[:, :, :3]
 
     parts: list[PartData] = []
     part_counter = 0
@@ -31,14 +43,16 @@ def segment_parts(
         masked = no_bg.copy()
         masked[~mask] = [0, 0, 0, 0]
 
-        feathered = _feather_edges(masked, mask)
+        feathered = _feather_edges_adaptive(masked, mask)
 
         rows = np.any(mask, axis=1)
         cols = np.any(mask, axis=0)
         if not rows.any() or not cols.any():
             return None
-        y1, y2 = np.argmax(rows), len(rows) - np.argmax(rows[::-1])
-        x1, x2 = np.argmax(cols), len(cols) - np.argmax(cols[::-1])
+        y1 = int(np.argmax(rows))
+        y2 = int(len(rows) - np.argmax(rows[::-1]))
+        x1 = int(np.argmax(cols))
+        x2 = int(len(cols) - np.argmax(cols[::-1]))
 
         pad = 5
         x1 = max(0, x1 - pad)
@@ -63,31 +77,47 @@ def segment_parts(
 
     fx, fy, fw, fh = landmarks.face_rect
 
-    # --- Face ---
+    # --- Face mask (ellipse) ---
     face_mask = np.zeros((h, w), dtype=bool)
-    face_ellipse_mask = np.zeros((h, w), dtype=np.uint8)
+    face_ellipse_img = np.zeros((h, w), dtype=np.uint8)
     cv2.ellipse(
-        face_ellipse_mask,
+        face_ellipse_img,
         (landmarks.face_center_x, fy + int(fh * 0.5)),
         (fw // 2, int(fh * 0.55)),
         0, 0, 360, 255, -1,
     )
-    face_mask = (face_ellipse_mask > 0) & alpha_mask
+    face_mask = (face_ellipse_img > 0) & alpha_mask
 
-    # --- Eyes ---
+    # --- Eyes with iris separation ---
     for side, eye_rect in [("left", landmarks.left_eye_rect), ("right", landmarks.right_eye_rect)]:
         ex, ey, ew, eh = eye_rect
         expand = int(max(ew, eh) * 0.3)
-        eye_mask = _rect_mask(h, w, ex - expand, ey - expand, ew + expand * 2, eh + expand * 2) & alpha_mask
-        p = _save_part(f"eye_{side}", eye_mask)
-        if p:
-            parts.append(p)
+        eye_region_mask = _rect_mask(h, w, ex - expand, ey - expand, ew + expand * 2, eh + expand * 2) & alpha_mask
+
+        # Refine with GrabCut
+        eye_region_mask = _refine_mask_grabcut(rgb, eye_region_mask)
+
+        # Separate iris from eye white
+        iris_mask, white_mask = _separate_iris(no_bg, eye_region_mask, ex - expand, ey - expand, ew + expand * 2, eh + expand * 2)
+
+        if iris_mask is not None and iris_mask.sum() > 50:
+            p = _save_part(f"iris_{side}", iris_mask)
+            if p:
+                parts.append(p)
+            p = _save_part(f"eye_white_{side}", white_mask)
+            if p:
+                parts.append(p)
+        else:
+            p = _save_part(f"eye_{side}", eye_region_mask)
+            if p:
+                parts.append(p)
 
     # --- Eyebrows ---
     for side, brow_rect in [("left", landmarks.left_eyebrow_rect), ("right", landmarks.right_eyebrow_rect)]:
         bx, by, bw, bh = brow_rect
         expand = int(max(bw, bh) * 0.2)
         brow_mask = _rect_mask(h, w, bx - expand, by - expand, bw + expand * 2, bh + expand * 2) & alpha_mask
+        brow_mask = _refine_mask_grabcut(rgb, brow_mask)
         p = _save_part(f"eyebrow_{side}", brow_mask)
         if p:
             parts.append(p)
@@ -104,6 +134,7 @@ def segment_parts(
     mx, my, mw, mh = landmarks.mouth_rect
     expand_m = int(max(mw, mh) * 0.3)
     mouth_mask = _rect_mask(h, w, mx - expand_m, my - expand_m, mw + expand_m * 2, mh + expand_m * 2) & alpha_mask
+    mouth_mask = _refine_mask_grabcut(rgb, mouth_mask)
     p = _save_part("mouth", mouth_mask)
     if p:
         parts.append(p)
@@ -111,10 +142,10 @@ def segment_parts(
     # --- Face (excluding sub-parts) ---
     sub_parts_mask = np.zeros((h, w), dtype=bool)
     for side in ["left", "right"]:
-        ex, ey, ew, eh = getattr(landmarks, f"{side}_eye_rect")
-        sub_parts_mask |= _rect_mask(h, w, ex, ey, ew, eh)
-        bx, by, bw, bh = getattr(landmarks, f"{side}_eyebrow_rect")
-        sub_parts_mask |= _rect_mask(h, w, bx, by, bw, bh)
+        er = getattr(landmarks, f"{side}_eye_rect")
+        sub_parts_mask |= _rect_mask(h, w, *er)
+        br = getattr(landmarks, f"{side}_eyebrow_rect")
+        sub_parts_mask |= _rect_mask(h, w, *br)
     sub_parts_mask |= _rect_mask(h, w, *landmarks.nose_rect)
     sub_parts_mask |= _rect_mask(h, w, *landmarks.mouth_rect)
 
@@ -123,9 +154,10 @@ def segment_parts(
     if p:
         parts.append(p)
 
-    # --- Hair ---
-    hair_mask = _detect_hair(image_rgba, no_bg, landmarks, alpha_mask, face_mask)
+    # --- Hair (K-means clustering) ---
+    hair_mask = _detect_hair_kmeans(image_rgba, no_bg, landmarks, alpha_mask, face_mask)
 
+    # Split hair into front/back/sides
     hair_front_mask = hair_mask & face_mask
     p = _save_part("hair_front", hair_front_mask)
     if p:
@@ -152,74 +184,56 @@ def segment_parts(
     if p:
         parts.append(p)
 
-    # --- Body ---
-    body_mask = alpha_mask & ~face_mask & ~hair_mask
-    body_mask[:landmarks.face_top, :] = False
-    p = _save_part("body", body_mask)
+    # --- Body and Arms ---
+    body_full_mask = alpha_mask & ~face_mask & ~hair_mask
+    body_full_mask[:landmarks.face_top, :] = False
+
+    arm_left, arm_right, body_core = _detect_arms(body_full_mask, landmarks, alpha_mask)
+
+    p = _save_part("body", body_core)
     if p:
         parts.append(p)
+
+    if arm_left is not None:
+        p = _save_part("arm_left", arm_left)
+        if p:
+            parts.append(p)
+    if arm_right is not None:
+        p = _save_part("arm_right", arm_right)
+        if p:
+            parts.append(p)
 
     parts.sort(key=lambda p: p.depth_order)
     return parts
 
 
 def _rect_mask(h: int, w: int, rx: int, ry: int, rw: int, rh: int) -> np.ndarray:
-    """Create a boolean mask for a rectangle region."""
     mask = np.zeros((h, w), dtype=bool)
     x1 = max(0, int(rx))
     y1 = max(0, int(ry))
     x2 = min(w, int(rx + rw))
     y2 = min(h, int(ry + rh))
-    mask[y1:y2, x1:x2] = True
+    if x2 > x1 and y2 > y1:
+        mask[y1:y2, x1:x2] = True
     return mask
 
 
-def _detect_hair(
+def _detect_hair_kmeans(
     image_rgba: np.ndarray,
     no_bg: np.ndarray,
     landmarks: FaceLandmarks,
     alpha_mask: np.ndarray,
     face_mask: np.ndarray,
 ) -> np.ndarray:
-    """Detect hair region using color analysis and position heuristics."""
+    """Detect hair using K-means color clustering.
+
+    Much more robust than HSV thresholding - handles white, black, gradient, and multi-color hair.
+    """
     h, w = image_rgba.shape[:2]
     fx, fy, fw, fh = landmarks.face_rect
+    rgb = no_bg[:, :, :3].astype(np.float32)
 
-    rgb = no_bg[:, :, :3]
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-
-    hair_candidate = alpha_mask.copy()
-
-    # Sample hair color from above the face
-    sample_y1 = max(0, fy - int(fh * 0.3))
-    sample_y2 = fy
-    sample_x1 = max(0, landmarks.face_center_x - fw // 4)
-    sample_x2 = min(w, landmarks.face_center_x + fw // 4)
-
-    sample_region = hsv[sample_y1:sample_y2, sample_x1:sample_x2]
-    sample_alpha = alpha_mask[sample_y1:sample_y2, sample_x1:sample_x2]
-
-    if sample_alpha.sum() > 50:
-        hair_pixels = sample_region[sample_alpha]
-        median_h = np.median(hair_pixels[:, 0])
-        median_s = np.median(hair_pixels[:, 1])
-
-        h_range = 25
-        s_range = 60
-        lower = np.array([max(0, median_h - h_range), max(0, median_s - s_range), 30])
-        upper = np.array([min(180, median_h + h_range), min(255, median_s + s_range), 255])
-
-        color_mask = cv2.inRange(hsv, lower, upper) > 0
-        hair_candidate = alpha_mask & color_mask
-    else:
-        above_face = np.zeros((h, w), dtype=bool)
-        above_face[:fy + int(fh * 0.2), :] = True
-        hair_candidate = alpha_mask & above_face
-
-    # Exclude body region (below face)
-    body_region = np.zeros((h, w), dtype=bool)
-    body_region[landmarks.face_bottom + int(fh * 0.2):, :] = True
-
+    # Candidate pixels: alpha-visible, not inside face interior, not far below face
     face_interior = np.zeros((h, w), dtype=np.uint8)
     cv2.ellipse(
         face_interior,
@@ -229,22 +243,315 @@ def _detect_hair(
     )
     face_interior_mask = face_interior > 0
 
-    hair_mask = hair_candidate & ~body_region & ~face_interior_mask
+    body_region = np.zeros((h, w), dtype=bool)
+    body_region[landmarks.face_bottom + int(fh * 0.3):, :] = True
+
+    candidate_mask = alpha_mask & ~face_interior_mask & ~body_region
+
+    candidate_pixels = rgb[candidate_mask]
+    if len(candidate_pixels) < 100:
+        # Fallback to simple approach
+        return _detect_hair_fallback(no_bg, landmarks, alpha_mask, face_mask)
+
+    # K-means clustering (K=5)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 15, 1.0)
+    K = min(5, len(candidate_pixels) // 50)
+    K = max(2, K)
+
+    _, labels, centers = cv2.kmeans(
+        candidate_pixels, K, None, criteria, attempts=3, flags=cv2.KMEANS_PP_CENTERS,
+    )
+
+    # Create label map for candidate pixels
+    label_map = np.full((h, w), -1, dtype=np.int32)
+    label_map[candidate_mask] = labels.flatten()
+
+    # Score each cluster as potential hair
+    best_hair_clusters = []
+    for k in range(K):
+        cluster_mask = label_map == k
+        total = cluster_mask.sum()
+        if total < 50:
+            continue
+
+        # Ratio of pixels above face top
+        above_face = cluster_mask[:fy + int(fh * 0.2), :].sum()
+        above_ratio = above_face / total if total > 0 else 0
+
+        # Ratio of pixels adjacent to face ellipse
+        dilated_face = cv2.dilate(face_mask.astype(np.uint8) * 255,
+                                   cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
+        near_face = cluster_mask & (dilated_face > 0) & ~face_mask
+        surround_ratio = near_face.sum() / total if total > 0 else 0
+
+        # Normalized size
+        max_possible = candidate_mask.sum()
+        size_ratio = total / max_possible if max_possible > 0 else 0
+
+        score = above_ratio * 0.4 + surround_ratio * 0.4 + size_ratio * 0.2
+        best_hair_clusters.append((k, score))
+
+    best_hair_clusters.sort(key=lambda x: x[1], reverse=True)
+
+    # Select clusters with score above threshold
+    hair_mask = np.zeros((h, w), dtype=bool)
+    threshold = 0.15
+    for k, score in best_hair_clusters:
+        if score >= threshold:
+            hair_mask |= (label_map == k)
+
+    # Morphological cleanup
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    hair_uint8 = hair_mask.astype(np.uint8) * 255
+    hair_uint8 = cv2.morphologyEx(hair_uint8, cv2.MORPH_CLOSE, kernel, iterations=2)
+    hair_uint8 = cv2.morphologyEx(hair_uint8, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    # Keep only largest connected components
+    labeled, num_features = ndimage.label(hair_uint8 > 0)
+    if num_features > 0:
+        sizes = ndimage.sum(hair_uint8 > 0, labeled, range(1, num_features + 1))
+        max_size = max(sizes) if len(sizes) > 0 else 0
+        # Keep components that are at least 10% of the largest
+        for i, size in enumerate(sizes):
+            if size < max_size * 0.1:
+                hair_uint8[labeled == (i + 1)] = 0
+
+    hair_mask = hair_uint8 > 0
+    return hair_mask
+
+
+def _detect_hair_fallback(
+    no_bg: np.ndarray,
+    landmarks: FaceLandmarks,
+    alpha_mask: np.ndarray,
+    face_mask: np.ndarray,
+) -> np.ndarray:
+    """Simple fallback hair detection using color sampling."""
+    h, w = no_bg.shape[:2]
+    fx, fy, fw, fh = landmarks.face_rect
+    hsv = cv2.cvtColor(no_bg[:, :, :3], cv2.COLOR_RGB2HSV)
+
+    # Multi-point sampling
+    sample_positions = [
+        (max(0, fy - int(fh * 0.3)), fy, max(0, landmarks.face_center_x - fw // 4), min(w, landmarks.face_center_x + fw // 4)),
+        (max(0, fy - int(fh * 0.2)), fy, max(0, fx - fw // 3), fx),
+        (max(0, fy - int(fh * 0.2)), fy, fx + fw, min(w, fx + fw + fw // 3)),
+    ]
+
+    all_hair_pixels = []
+    for sy1, sy2, sx1, sx2 in sample_positions:
+        region = hsv[sy1:sy2, sx1:sx2]
+        region_alpha = alpha_mask[sy1:sy2, sx1:sx2]
+        if region_alpha.sum() > 20:
+            all_hair_pixels.append(region[region_alpha])
+
+    if not all_hair_pixels:
+        above_face = np.zeros((h, w), dtype=bool)
+        above_face[:fy + int(fh * 0.2), :] = True
+        return alpha_mask & above_face
+
+    hair_pixels = np.concatenate(all_hair_pixels)
+    median_h = np.median(hair_pixels[:, 0])
+    median_s = np.median(hair_pixels[:, 1])
+
+    h_range = 30
+    s_range = 70
+    lower = np.array([max(0, median_h - h_range), max(0, median_s - s_range), 20])
+    upper = np.array([min(180, median_h + h_range), min(255, median_s + s_range), 255])
+
+    color_mask = cv2.inRange(hsv, lower, upper) > 0
+
+    face_interior = np.zeros((h, w), dtype=np.uint8)
+    cv2.ellipse(face_interior, (landmarks.face_center_x, fy + int(fh * 0.5)),
+                (int(fw * 0.35), int(fh * 0.4)), 0, 0, 360, 255, -1)
+
+    body_region = np.zeros((h, w), dtype=bool)
+    body_region[landmarks.face_bottom + int(fh * 0.2):, :] = True
+
+    hair_mask = alpha_mask & color_mask & ~(face_interior > 0) & ~body_region
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     hair_uint8 = hair_mask.astype(np.uint8) * 255
     hair_uint8 = cv2.morphologyEx(hair_uint8, cv2.MORPH_CLOSE, kernel, iterations=2)
     hair_uint8 = cv2.morphologyEx(hair_uint8, cv2.MORPH_OPEN, kernel, iterations=1)
-    hair_mask = hair_uint8 > 0
 
-    return hair_mask
+    return hair_uint8 > 0
 
 
-def _feather_edges(image_rgba: np.ndarray, mask: np.ndarray, radius: int = 3) -> np.ndarray:
-    """Apply Gaussian feathering to the edges of a masked region."""
+def _refine_mask_grabcut(rgb_image: np.ndarray, initial_mask: np.ndarray, iterations: int = 3) -> np.ndarray:
+    """Refine a part mask using GrabCut for pixel-accurate boundaries.
+
+    Only processes the bounding box region of the mask to keep it fast.
+    """
+    h, w = rgb_image.shape[:2]
+
+    rows = np.any(initial_mask, axis=1)
+    cols = np.any(initial_mask, axis=0)
+    if not rows.any() or not cols.any():
+        return initial_mask
+
+    y1 = max(0, int(np.argmax(rows)) - 10)
+    y2 = min(h, int(len(rows) - np.argmax(rows[::-1])) + 10)
+    x1 = max(0, int(np.argmax(cols)) - 10)
+    x2 = min(w, int(len(cols) - np.argmax(cols[::-1])) + 10)
+
+    roi_h = y2 - y1
+    roi_w = x2 - x1
+    if roi_h < 20 or roi_w < 20:
+        return initial_mask
+
+    roi_rgb = rgb_image[y1:y2, x1:x2].copy()
+    roi_mask_bool = initial_mask[y1:y2, x1:x2]
+
+    # Ensure image is BGR uint8 for GrabCut
+    if roi_rgb.dtype != np.uint8:
+        roi_rgb = roi_rgb.astype(np.uint8)
+    roi_bgr = cv2.cvtColor(roi_rgb, cv2.COLOR_RGB2BGR)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    eroded = cv2.erode(roi_mask_bool.astype(np.uint8), kernel, iterations=2)
+    dilated = cv2.dilate(roi_mask_bool.astype(np.uint8), kernel, iterations=3)
+
+    gc_mask = np.full((roi_h, roi_w), cv2.GC_BGD, dtype=np.uint8)
+    gc_mask[dilated > 0] = cv2.GC_PR_BGD
+    gc_mask[roi_mask_bool] = cv2.GC_PR_FGD
+    gc_mask[eroded > 0] = cv2.GC_FGD
+
+    bgd_model = np.zeros((1, 65), np.float64)
+    fgd_model = np.zeros((1, 65), np.float64)
+
+    try:
+        cv2.grabCut(roi_bgr, gc_mask, None, bgd_model, fgd_model, iterations, cv2.GC_INIT_WITH_MASK)
+        refined_roi = (gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD)
+    except cv2.error:
+        return initial_mask
+
+    result = initial_mask.copy()
+    result[y1:y2, x1:x2] = refined_roi
+    return result
+
+
+def _separate_iris(
+    no_bg: np.ndarray,
+    eye_mask: np.ndarray,
+    ex: int, ey: int, ew: int, eh: int,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Separate iris/pupil from eye white using Otsu thresholding."""
+    h, w = no_bg.shape[:2]
+
+    x1 = max(0, ex)
+    y1 = max(0, ey)
+    x2 = min(w, ex + ew)
+    y2 = min(h, ey + eh)
+
+    if x2 - x1 < 10 or y2 - y1 < 10:
+        return None, None
+
+    roi = no_bg[y1:y2, x1:x2]
+    roi_mask = eye_mask[y1:y2, x1:x2]
+
+    if roi_mask.sum() < 50:
+        return None, None
+
+    gray = cv2.cvtColor(roi[:, :, :3], cv2.COLOR_RGB2GRAY)
+    gray_masked = gray.copy()
+    gray_masked[~roi_mask] = 255  # Set non-eye to white
+
+    _, binary = cv2.threshold(gray_masked, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    binary = binary & roi_mask.astype(np.uint8) * 255
+
+    # Find connected components - largest dark blob = iris
+    labeled, num_features = ndimage.label(binary > 0)
+    if num_features == 0:
+        return None, None
+
+    sizes = ndimage.sum(binary > 0, labeled, range(1, num_features + 1))
+    iris_label_id = int(np.argmax(sizes)) + 1
+    iris_roi = labeled == iris_label_id
+
+    # Iris must be in the center region of the eye
+    iris_cy = np.mean(np.where(iris_roi)[0])
+    iris_cx = np.mean(np.where(iris_roi)[1])
+    roi_cy = roi_mask.shape[0] / 2
+    roi_cx = roi_mask.shape[1] / 2
+
+    if abs(iris_cy - roi_cy) > roi_mask.shape[0] * 0.4 or abs(iris_cx - roi_cx) > roi_mask.shape[1] * 0.4:
+        return None, None
+
+    iris_full = np.zeros((h, w), dtype=bool)
+    iris_full[y1:y2, x1:x2] = iris_roi
+
+    white_full = eye_mask & ~iris_full
+
+    return iris_full, white_full
+
+
+def _detect_arms(
+    body_mask: np.ndarray,
+    landmarks: FaceLandmarks,
+    alpha_mask: np.ndarray,
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray]:
+    """Detect arms as protrusions from the central body mass."""
+    h, w = body_mask.shape
+    if body_mask.sum() < 200:
+        return None, None, body_mask
+
+    center_x = landmarks.face_center_x
+
+    # Define body core as the central 40% width region
+    core_left = center_x - int(w * 0.15)
+    core_right = center_x + int(w * 0.15)
+    core_left = max(0, core_left)
+    core_right = min(w, core_right)
+
+    body_core = body_mask.copy()
+
+    # Pixels outside the core that are part of body = potential arms
+    arm_candidate = body_mask.copy()
+    arm_candidate[:, core_left:core_right] = False
+
+    if arm_candidate.sum() < 100:
+        return None, None, body_mask
+
+    arm_left = arm_candidate.copy()
+    arm_left[:, center_x:] = False
+
+    arm_right = arm_candidate.copy()
+    arm_right[:, :center_x] = False
+
+    # Only return arms if they are substantial enough
+    arm_left_result = arm_left if arm_left.sum() > 200 else None
+    arm_right_result = arm_right if arm_right.sum() > 200 else None
+
+    # Body core = body minus detected arms
+    if arm_left_result is not None:
+        body_core = body_core & ~arm_left
+    if arm_right_result is not None:
+        body_core = body_core & ~arm_right
+
+    return arm_left_result, arm_right_result, body_core
+
+
+def _feather_edges_adaptive(image_rgba: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Apply distance-transform-based adaptive feathering."""
     result = image_rgba.copy()
-    mask_uint8 = mask.astype(np.uint8) * 255
-    blurred = cv2.GaussianBlur(mask_uint8, (radius * 2 + 1, radius * 2 + 1), radius)
-    alpha_factor = blurred.astype(np.float32) / 255.0
+
+    # Compute adaptive feather radius based on part size
+    rows = np.any(mask, axis=1)
+    cols = np.any(mask, axis=0)
+    if not rows.any() or not cols.any():
+        return result
+
+    part_h = int(np.sum(rows))
+    part_w = int(np.sum(cols))
+    feather_width = max(2, int(math.sqrt(part_w ** 2 + part_h ** 2) * 0.008))
+
+    # Distance transform from mask boundary
+    mask_uint8 = mask.astype(np.uint8)
+    dist = cv2.distanceTransform(mask_uint8, cv2.DIST_L2, 5)
+
+    # Smooth alpha gradient at edges
+    alpha_factor = np.clip(dist / feather_width, 0.0, 1.0)
     result[:, :, 3] = (result[:, :, 3].astype(np.float32) * alpha_factor).astype(np.uint8)
+
     return result

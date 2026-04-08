@@ -18,6 +18,8 @@ PART_DEFINITIONS = [
     PartLabel("ear_right", "右耳", 6),
     PartLabel("eye_white_left", "左白目", 7),
     PartLabel("eye_white_right", "右白目", 8),
+    PartLabel("eye_left", "左目", 7),      # fallback when iris separation fails
+    PartLabel("eye_right", "右目", 8),     # fallback when iris separation fails
     PartLabel("iris_left", "左瞳", 9),
     PartLabel("iris_right", "右瞳", 10),
     PartLabel("eyebrow_left", "左眉", 11),
