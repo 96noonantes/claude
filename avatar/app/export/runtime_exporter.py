@@ -241,8 +241,8 @@ def _build_motions():
             "loop": False,
             "fps": 30,
             "curves": {
-                "eyeLOpen": [1.0, 0.5, 0.0, 0.0, 0.5, 1.0],
-                "eyeROpen": [1.0, 0.5, 0.0, 0.0, 0.5, 1.0],
+                "eyeLOpen": [1.0, 0.9, 0.7, 0.4, 0.1, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 1.0],
+                "eyeROpen": [1.0, 0.9, 0.7, 0.4, 0.1, 0.0, 0.0, 0.1, 0.4, 0.7, 0.9, 1.0],
             },
         },
     }
@@ -258,16 +258,17 @@ def _sine_curve(duration, fps, amplitude, frequency, offset=0.0):
 
 def _build_expressions():
     """Build expression presets."""
+    # Must match EXPRESSIONS in animationEngine.js
     return {
         "neutral": {},
-        "happy": {"eyeLSmile": 1.0, "eyeRSmile": 1.0, "eyeLOpen": 0.7, "eyeROpen": 0.7, "mouthForm": 1.0, "mouthOpenY": 0.3},
-        "sad": {"eyeLOpen": 0.6, "eyeROpen": 0.6, "mouthForm": -0.7, "browLY": -0.5, "browRY": -0.5},
-        "angry": {"eyeLOpen": 0.9, "eyeROpen": 0.9, "mouthForm": -0.5, "mouthOpenY": 0.2, "browLAngle": 0.8, "browRAngle": 0.8},
+        "happy": {"eyeLSmile": 1.0, "eyeRSmile": 1.0, "eyeLOpen": 0.7, "eyeROpen": 0.7, "mouthForm": 1.0, "mouthOpenY": 0.3, "browLY": 0.3, "browRY": 0.3},
+        "sad": {"eyeLOpen": 0.6, "eyeROpen": 0.6, "mouthForm": -0.7, "browLY": -0.5, "browRY": -0.5, "browLAngle": -0.6, "browRAngle": -0.6},
+        "angry": {"eyeLOpen": 0.9, "eyeROpen": 0.9, "mouthForm": -0.5, "mouthOpenY": 0.2, "browLY": -0.3, "browRY": -0.3, "browLAngle": 0.8, "browRAngle": 0.8},
         "surprised": {"eyeLOpen": 1.0, "eyeROpen": 1.0, "mouthOpenY": 0.8, "browLY": 0.8, "browRY": 0.8},
-        "embarrassed": {"eyeLSmile": 0.6, "eyeRSmile": 0.6, "eyeLOpen": 0.5, "eyeROpen": 0.5, "mouthForm": 0.4},
+        "embarrassed": {"eyeLSmile": 0.6, "eyeRSmile": 0.6, "eyeLOpen": 0.5, "eyeROpen": 0.5, "mouthForm": 0.4, "browLY": 0.2, "browRY": 0.2},
         "wink_left": {"eyeLOpen": 0.0, "eyeROpen": 1.0, "eyeLSmile": 0.8, "mouthForm": 0.7},
         "sleepy": {"eyeLOpen": 0.2, "eyeROpen": 0.2, "mouthOpenY": 0.5, "browLY": -0.3, "browRY": -0.3},
-        "smug": {"eyeLOpen": 0.6, "eyeROpen": 0.6, "eyeLSmile": 0.5, "eyeRSmile": 0.5, "mouthForm": 0.8},
+        "smug": {"eyeLOpen": 0.6, "eyeROpen": 0.6, "eyeLSmile": 0.5, "eyeRSmile": 0.5, "mouthForm": 0.8, "browLY": 0.2, "browRY": -0.2, "browLAngle": 0.3},
     }
 
 

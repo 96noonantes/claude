@@ -57,6 +57,10 @@ def pack_atlas(
 
     items.sort(key=lambda x: x[2] * x[3], reverse=True)
 
+    # Filter out parts larger than max atlas size
+    items = [(pid, img, pw, ph) for pid, img, pw, ph in items
+             if pw <= max_size and ph <= max_size]
+
     # Determine atlas size
     total_area = sum(w * h for _, _, w, h in items)
     atlas_size = 512
@@ -64,49 +68,49 @@ def pack_atlas(
         atlas_size *= 2
     atlas_size = min(atlas_size, max_size)
 
-    # MaxRects packing
-    regions = {}
-    free_rects = [_Rect(0, 0, atlas_size, atlas_size)]
+    # MaxRects packing (with retry at larger sizes)
+    for attempt in range(4):  # max 4 doublings: 512→1024→2048→4096
+        regions = {}
+        free_rects = [_Rect(0, 0, atlas_size, atlas_size)]
+        all_placed = True
 
-    for part_id, img, pw, ph in items:
-        best_rect = None
-        best_idx = -1
-        best_score = float('inf')
+        for part_id, img, pw, ph in items:
+            best_rect = None
+            best_idx = -1
+            best_score = float('inf')
 
-        for i, rect in enumerate(free_rects):
-            if pw <= rect.w and ph <= rect.h:
-                score = min(rect.w - pw, rect.h - ph)
-                if score < best_score:
-                    best_score = score
-                    best_rect = rect
-                    best_idx = i
+            for i, rect in enumerate(free_rects):
+                if pw <= rect.w and ph <= rect.h:
+                    score = min(rect.w - pw, rect.h - ph)
+                    if score < best_score:
+                        best_score = score
+                        best_rect = rect
+                        best_idx = i
 
-        if best_rect is None:
-            # Doesn't fit — try doubling atlas (up to max_size)
-            if atlas_size < max_size:
-                atlas_size = min(atlas_size * 2, max_size)
-                free_rects = [_Rect(0, 0, atlas_size, atlas_size)]
-                regions.clear()
-                # Restart packing (simple retry)
-                return pack_atlas(parts_data, parts_dir, max_size)
-            # Skip part if atlas is at max size
-            continue
+            if best_rect is None:
+                all_placed = False
+                break
 
-        # Place part
-        x, y = best_rect.x, best_rect.y
-        regions[part_id] = AtlasRegion(x, y, img.width, img.height)
+            # Place part
+            x, y = best_rect.x, best_rect.y
+            regions[part_id] = AtlasRegion(x, y, img.width, img.height)
 
-        # Split free rect
-        del free_rects[best_idx]
-        # Right remainder
-        if best_rect.w - pw > 0:
-            free_rects.append(_Rect(x + pw, y, best_rect.w - pw, ph))
-        # Bottom remainder
-        if best_rect.h - ph > 0:
-            free_rects.append(_Rect(x, y + ph, best_rect.w, best_rect.h - ph))
+            # Split free rect
+            del free_rects[best_idx]
+            if best_rect.w - pw > 0:
+                free_rects.append(_Rect(x + pw, y, best_rect.w - pw, ph))
+            if best_rect.h - ph > 0:
+                free_rects.append(_Rect(x, y + ph, best_rect.w, best_rect.h - ph))
+            _prune_free_rects(free_rects)
 
-        # Merge overlapping free rects (simple cleanup)
-        _prune_free_rects(free_rects)
+        if all_placed:
+            break
+
+        # Retry with larger atlas
+        if atlas_size < max_size:
+            atlas_size = min(atlas_size * 2, max_size)
+        else:
+            break  # Can't grow further, use what we have
 
     # Compose atlas image
     atlas = Image.new("RGBA", (atlas_size, atlas_size), (0, 0, 0, 0))

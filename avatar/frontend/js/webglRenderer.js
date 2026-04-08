@@ -152,6 +152,8 @@ const WebGLRenderer = {
             this._parts.push({
                 vao,
                 positionBuffer: posBuf,
+                uvBuffer: uvBuf,
+                indexBuffer: idxBuf,
                 indexCount: mesh.indices.length,
                 vertexCount: mesh.vertex_count,
                 baseVertices: baseVerts,
@@ -160,7 +162,7 @@ const WebGLRenderer = {
             });
         }
 
-        this._ready = true;
+        this._ready = !!this._atlasTexture;
     },
 
     updateParams(params) {
@@ -207,16 +209,16 @@ const WebGLRenderer = {
                     } else if (def.type === 'translate_y') {
                         deformed[i * 2 + 1] += influence * ph;
                     } else if (def.type === 'chain') {
-                        // Chain: rotation from root, weighted by distance
-                        const rad = influence * 0.5 * Math.PI / 180;
+                        // Chain: rotation + sway from root, weight = distance from root
+                        const rad = paramVal * def.scale * w * Math.PI / 180;
                         const dx = vx - px;
                         const dy = vy - py;
                         const c = Math.cos(rad);
                         const s = Math.sin(rad);
                         deformed[i * 2] = px + dx * c - dy * s;
                         deformed[i * 2 + 1] = py + dx * s + dy * c;
-                        // Additional horizontal sway for chain tip
-                        deformed[i * 2] += influence * w * 0.3;
+                        // Horizontal sway proportional to weight (tip moves more)
+                        deformed[i * 2] += paramVal * w * 0.5;
                     }
                 }
             }
@@ -254,6 +256,9 @@ const WebGLRenderer = {
         if (!gl) return;
         for (const part of this._parts) {
             gl.deleteVertexArray(part.vao);
+            gl.deleteBuffer(part.positionBuffer);
+            gl.deleteBuffer(part.uvBuffer);
+            gl.deleteBuffer(part.indexBuffer);
         }
         if (this._atlasTexture) gl.deleteTexture(this._atlasTexture);
         if (this._program) gl.deleteProgram(this._program);
@@ -278,7 +283,10 @@ const WebGLRenderer = {
                 this._atlasTexture = tex;
                 resolve();
             };
-            img.onerror = resolve;
+            img.onerror = () => {
+                console.error('Atlas texture load failed:', url);
+                resolve();
+            };
             img.src = url;
         });
     },
