@@ -80,24 +80,28 @@ const PartEditor = {
 
         if (App.parts.length === 0) return;
 
-        const firstPart = App.parts[0];
-        const maxX = Math.max(...App.parts.map(p => p.bounds.x + p.bounds.width));
-        const maxY = Math.max(...App.parts.map(p => p.bounds.y + p.bounds.height));
+        const visibleParts = App.parts.filter(p => p.visible);
+        const allParts = App.parts;
+        const maxX = allParts.reduce((m, p) => Math.max(m, p.bounds.x + p.bounds.width), 0);
+        const maxY = allParts.reduce((m, p) => Math.max(m, p.bounds.y + p.bounds.height), 0);
         canvas.width = maxX + 20;
         canvas.height = maxY + 20;
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Draw original image if toggled
+        // Draw original image if toggled (cached to avoid flicker)
         if (this.showOriginal && App.sessionId) {
-            const origImg = new Image();
-            origImg.onload = () => {
-                canvas.width = origImg.width;
-                canvas.height = origImg.height;
-                ctx.drawImage(origImg, 0, 0);
-                if (this.showOverlay) this._drawOverlay(ctx);
-            };
-            origImg.src = `/workspace/${App.sessionId}/original.png`;
+            if (!this._originalImage) {
+                this._originalImage = new Image();
+                this._originalImage.onload = () => this.drawCanvas();
+                this._originalImage.src = `/workspace/${App.sessionId}/original.png`;
+                return;
+            }
+            if (!this._originalImage.complete) return;
+            canvas.width = this._originalImage.width;
+            canvas.height = this._originalImage.height;
+            ctx.drawImage(this._originalImage, 0, 0);
+            if (this.showOverlay) this._drawOverlay(ctx);
             return;
         }
 

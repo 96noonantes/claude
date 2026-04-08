@@ -474,10 +474,16 @@ def _refine_mask_grabcut(rgb_image: np.ndarray, initial_mask: np.ndarray, iterat
     bgd_model = np.zeros((1, 65), np.float64)
     fgd_model = np.zeros((1, 65), np.float64)
 
+    # GrabCut requires both FG and BG pixels
+    has_bg = (gc_mask == cv2.GC_BGD).any() or (gc_mask == cv2.GC_PR_BGD).any()
+    has_fg = (gc_mask == cv2.GC_FGD).any() or (gc_mask == cv2.GC_PR_FGD).any()
+    if not has_bg or not has_fg:
+        return initial_mask
+
     try:
         cv2.grabCut(roi_bgr, gc_mask, None, bgd_model, fgd_model, iterations, cv2.GC_INIT_WITH_MASK)
         refined_roi = (gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD)
-    except cv2.error:
+    except Exception:
         return initial_mask
 
     result = initial_mask.copy()

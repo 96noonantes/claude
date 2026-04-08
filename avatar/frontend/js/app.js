@@ -96,14 +96,19 @@ const App = {
 
         part.visible = !part.visible;
 
-        await fetch(`/api/parts/${this.sessionId}/${partId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ visible: part.visible }),
-        });
-
-        PartEditor.renderParts(this.parts);
-        Preview.renderParts(this.parts);
+        try {
+            const res = await fetch(`/api/parts/${this.sessionId}/${partId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ visible: part.visible }),
+            });
+            if (!res.ok) throw new Error();
+            PartEditor.renderParts(this.parts);
+            Preview.renderParts(this.parts);
+        } catch (e) {
+            part.visible = !part.visible;  // revert on failure
+            this.showToast('パーツの更新に失敗しました', 'error');
+        }
     },
 
     selectPart(partId) {

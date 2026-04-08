@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
@@ -15,7 +17,9 @@ async def create_export(session_id: str):
     if session.status != "done":
         raise HTTPException(400, "パーツ分解が完了していません")
 
-    zip_path = build_export_package(session)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, build_export_package, session)
+
     return {
         "download_url": f"/api/export/{session_id}/download",
         "filename": f"live2d_avatar_{session_id}.zip",
@@ -30,7 +34,8 @@ async def download_export(session_id: str):
 
     zip_path = session.dir / "export" / f"live2d_avatar_{session_id}.zip"
     if not zip_path.exists():
-        build_export_package(session)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, build_export_package, session)
 
     if not zip_path.exists():
         raise HTTPException(500, "エクスポートファイルの生成に失敗しました")
