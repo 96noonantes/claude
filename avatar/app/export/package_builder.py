@@ -8,12 +8,13 @@ from app.export.psd_exporter import export_psd
 from app.export.model3_generator import (
     generate_model3_json,
     generate_physics3_json,
-    generate_motion3_json,
+    generate_motion_files,
+    generate_expression_files,
 )
 
 
 def build_export_package(session: SessionData) -> Path:
-    """Build a ZIP containing PSD, model3.json, physics, motions, and part PNGs."""
+    """Build a ZIP containing PSD, model3.json, physics, motions, expressions, and part PNGs."""
     export_dir = session.dir / "export"
     export_dir.mkdir(parents=True, exist_ok=True)
 
@@ -40,16 +41,17 @@ def build_export_package(session: SessionData) -> Path:
         session.image_height,
     )
 
-    # Generate model3.json
+    # Generate model3.json + parameters.json
     generate_model3_json(session, build_dir / "model3.json")
 
     # Generate physics3.json
     generate_physics3_json(build_dir / "physics3.json")
 
-    # Generate idle motion
-    motions_dir = build_dir / "motions"
-    motions_dir.mkdir()
-    generate_motion3_json(motions_dir / "idle.motion3.json")
+    # Generate motions (idle, blink)
+    generate_motion_files(build_dir / "motions")
+
+    # Generate expression presets (happy, sad, angry, surprised, etc.)
+    generate_expression_files(build_dir / "expressions")
 
     # Create ZIP
     zip_path = export_dir / f"live2d_avatar_{session.session_id}"
