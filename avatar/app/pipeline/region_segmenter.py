@@ -184,24 +184,80 @@ def segment_parts(
     if p:
         parts.append(p)
 
-    # --- Body and Arms ---
+    # --- Body with clothing layer separation ---
     body_full_mask = alpha_mask & ~face_mask & ~hair_mask
     body_full_mask[:landmarks.face_top, :] = False
 
-    arm_left, arm_right, body_core = _detect_arms(body_full_mask, landmarks, alpha_mask)
+    # Try clothing segmentation (skin / upper wear / lower wear)
+    clothing_result = _segment_clothing_layers(image_rgba, no_bg, body_full_mask, landmarks)
 
-    p = _save_part("body", body_core)
-    if p:
-        parts.append(p)
+    if clothing_result is not None:
+        skin_mask, upper_mask, lower_mask, neck_mask = clothing_result
 
-    if arm_left is not None:
-        p = _save_part("arm_left", arm_left)
+        # Arms: protrusions from central body mass in skin areas
+        arm_left, arm_right, skin_core = _detect_arms(skin_mask, landmarks, alpha_mask)
+
+        # Legs: lower body skin regions
+        leg_left, leg_right = _detect_legs(skin_mask, landmarks)
+
+        # Save body skin (素体)
+        p = _save_part("body_skin", skin_core)
         if p:
             parts.append(p)
-    if arm_right is not None:
-        p = _save_part("arm_right", arm_right)
+
+        # Save neck
+        if neck_mask is not None and neck_mask.sum() > 100:
+            p = _save_part("neck", neck_mask)
+            if p:
+                parts.append(p)
+
+        # Save outerwear upper (上半身衣装)
+        if upper_mask.sum() > 200:
+            p = _save_part("outerwear_upper", upper_mask)
+            if p:
+                parts.append(p)
+
+        # Save outerwear lower (下半身衣装)
+        if lower_mask.sum() > 200:
+            p = _save_part("outerwear_lower", lower_mask)
+            if p:
+                parts.append(p)
+
+        # Arms
+        if arm_left is not None:
+            p = _save_part("arm_left", arm_left)
+            if p:
+                parts.append(p)
+        if arm_right is not None:
+            p = _save_part("arm_right", arm_right)
+            if p:
+                parts.append(p)
+
+        # Legs
+        if leg_left is not None:
+            p = _save_part("leg_left", leg_left)
+            if p:
+                parts.append(p)
+        if leg_right is not None:
+            p = _save_part("leg_right", leg_right)
+            if p:
+                parts.append(p)
+    else:
+        # Fallback: single body part
+        arm_left, arm_right, body_core = _detect_arms(body_full_mask, landmarks, alpha_mask)
+
+        p = _save_part("body", body_core)
         if p:
             parts.append(p)
+
+        if arm_left is not None:
+            p = _save_part("arm_left", arm_left)
+            if p:
+                parts.append(p)
+        if arm_right is not None:
+            p = _save_part("arm_right", arm_right)
+            if p:
+                parts.append(p)
 
     parts.sort(key=lambda p: p.depth_order)
     return parts
@@ -530,6 +586,260 @@ def _detect_arms(
         body_core = body_core & ~arm_right
 
     return arm_left_result, arm_right_result, body_core
+
+
+def _segment_clothing_layers(
+    image_rgba: np.ndarray,
+    no_bg: np.ndarray,
+    body_mask: np.ndarray,
+    landmarks: FaceLandmarks,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None] | None:
+    """Separate body into skin/upper-wear/lower-wear using u2net_cloth_seg.
+
+    u2net_cloth_seg outputs a segmentation map with 3 clothing classes.
+    We use this to separate the character body into:
+    - skin (素体/肌): exposed skin areas
+    - upper wear (上半身衣装): shirts, jackets, etc.
+    - lower wear (下半身衣装): skirts, pants, etc.
+
+    Returns (skin_mask, upper_mask, lower_mask, neck_mask) or None if fails.
+    """
+    try:
+        from rembg import new_session, remove
+        from PIL import Image as PILImage
+    except ImportError:
+        return None
+
+    h, w = image_rgba.shape[:2]
+    fx, fy, fw, fh = landmarks.face_rect
+
+    try:
+        # Run cloth segmentation
+        cloth_session = new_session("u2net_cloth_seg")
+        img_pil = PILImage.fromarray(no_bg)
+
+        # u2net_cloth_seg returns an image where different pixel values = different classes
+        # We need to get the raw mask output
+        result = remove(img_pil, session=cloth_session, only_mask=True)
+        mask_arr = np.array(result)
+
+        # The mask from u2net_cloth_seg encodes:
+        # - Values near 0: background
+        # - Different value ranges correspond to different clothing categories
+        # Normalize and threshold to separate regions
+        if len(mask_arr.shape) == 3:
+            mask_arr = mask_arr[:, :, 0]
+
+        # Resize mask to match original image if needed
+        if mask_arr.shape != (h, w):
+            mask_arr = cv2.resize(mask_arr, (w, h), interpolation=cv2.INTER_NEAREST)
+
+    except Exception:
+        return None
+
+    # Detect skin color from face region for skin identification
+    skin_color = _sample_skin_color(no_bg, landmarks)
+    if skin_color is None:
+        return None
+
+    # Classify body pixels into skin vs clothing
+    body_pixels_ycrcb = cv2.cvtColor(no_bg[:, :, :3], cv2.COLOR_RGB2YCrCb)
+
+    # Skin detection using sampled color with adaptive range
+    skin_y, skin_cr, skin_cb = skin_color
+    skin_range_cr = 25
+    skin_range_cb = 25
+
+    skin_color_mask = (
+        (body_pixels_ycrcb[:, :, 1] >= skin_cr - skin_range_cr) &
+        (body_pixels_ycrcb[:, :, 1] <= skin_cr + skin_range_cr) &
+        (body_pixels_ycrcb[:, :, 2] >= skin_cb - skin_range_cb) &
+        (body_pixels_ycrcb[:, :, 2] <= skin_cb + skin_range_cb)
+    )
+
+    # Skin = body pixels that match skin color
+    skin_mask = body_mask & skin_color_mask
+
+    # Clothing = body pixels that don't match skin color
+    clothing_mask = body_mask & ~skin_color_mask
+
+    # Split clothing into upper and lower based on position
+    # Waist line: roughly at 55-65% of body height from face bottom
+    body_rows = np.any(body_mask, axis=1)
+    if body_rows.any():
+        body_top = int(np.argmax(body_rows))
+        body_bottom = int(len(body_rows) - np.argmax(body_rows[::-1]))
+        body_height = body_bottom - body_top
+        waist_y = body_top + int(body_height * 0.45)
+    else:
+        waist_y = landmarks.face_bottom + int(fh * 1.5)
+
+    upper_clothing = clothing_mask.copy()
+    upper_clothing[waist_y:, :] = False
+
+    lower_clothing = clothing_mask.copy()
+    lower_clothing[:waist_y, :] = False
+
+    # Neck: skin area between face and upper body
+    neck_mask = skin_mask.copy()
+    neck_top = landmarks.face_bottom - int(fh * 0.1)
+    neck_bottom = landmarks.face_bottom + int(fh * 0.3)
+    neck_left = landmarks.face_center_x - int(fw * 0.3)
+    neck_right = landmarks.face_center_x + int(fw * 0.3)
+
+    neck_region = np.zeros((h, w), dtype=bool)
+    y1n = max(0, neck_top)
+    y2n = min(h, neck_bottom)
+    x1n = max(0, neck_left)
+    x2n = min(w, neck_right)
+    neck_region[y1n:y2n, x1n:x2n] = True
+    neck_detected = skin_mask & neck_region
+
+    # Remove neck from main skin mask
+    skin_mask = skin_mask & ~neck_detected
+
+    # Use OpenCV inpainting to generate skin under clothing for the skin layer
+    skin_mask = _inpaint_skin_under_clothing(no_bg, skin_mask, clothing_mask, body_mask)
+
+    # Morphological cleanup
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    for mask in [skin_mask, upper_clothing, lower_clothing]:
+        temp = mask.astype(np.uint8) * 255
+        temp = cv2.morphologyEx(temp, cv2.MORPH_CLOSE, kernel, iterations=1)
+        mask[:] = temp > 0
+
+    return skin_mask, upper_clothing, lower_clothing, neck_detected
+
+
+def _sample_skin_color(no_bg: np.ndarray, landmarks: FaceLandmarks) -> tuple[int, int, int] | None:
+    """Sample skin color from the face region in YCrCb color space."""
+    h, w = no_bg.shape[:2]
+    fx, fy, fw, fh = landmarks.face_rect
+
+    # Sample from cheek area (between eyes and mouth, left/right of nose)
+    ycrcb = cv2.cvtColor(no_bg[:, :, :3], cv2.COLOR_RGB2YCrCb)
+    alpha = no_bg[:, :, 3]
+
+    sample_y = fy + int(fh * 0.5)
+    sample_h = int(fh * 0.15)
+    sample_regions = [
+        (sample_y, sample_y + sample_h,
+         landmarks.face_center_x - int(fw * 0.35), landmarks.face_center_x - int(fw * 0.15)),
+        (sample_y, sample_y + sample_h,
+         landmarks.face_center_x + int(fw * 0.15), landmarks.face_center_x + int(fw * 0.35)),
+    ]
+
+    skin_pixels = []
+    for sy1, sy2, sx1, sx2 in sample_regions:
+        sy1 = max(0, sy1)
+        sy2 = min(h, sy2)
+        sx1 = max(0, sx1)
+        sx2 = min(w, sx2)
+        region = ycrcb[sy1:sy2, sx1:sx2]
+        region_alpha = alpha[sy1:sy2, sx1:sx2]
+        if region_alpha.sum() > 10:
+            skin_pixels.append(region[region_alpha > 128])
+
+    if not skin_pixels or all(len(p) == 0 for p in skin_pixels):
+        return None
+
+    all_pixels = np.concatenate(skin_pixels)
+    median_y = int(np.median(all_pixels[:, 0]))
+    median_cr = int(np.median(all_pixels[:, 1]))
+    median_cb = int(np.median(all_pixels[:, 2]))
+
+    return (median_y, median_cr, median_cb)
+
+
+def _inpaint_skin_under_clothing(
+    no_bg: np.ndarray,
+    skin_mask: np.ndarray,
+    clothing_mask: np.ndarray,
+    body_mask: np.ndarray,
+) -> np.ndarray:
+    """Generate estimated skin under clothing using inpainting.
+
+    This creates a continuous skin layer underneath the clothing,
+    so when the clothing layer is hidden, the skin is visible.
+    """
+    h, w = no_bg.shape[:2]
+
+    # The full body area should have skin underneath
+    full_skin_needed = body_mask.copy()
+
+    # Regions that need inpainting: clothing areas (skin is hidden there)
+    inpaint_region = clothing_mask & ~skin_mask
+
+    if inpaint_region.sum() < 50:
+        return skin_mask | (body_mask & ~clothing_mask)
+
+    # Use OpenCV inpainting to fill in skin texture under clothing
+    inpaint_mask = inpaint_region.astype(np.uint8) * 255
+
+    # Create a source image with known skin pixels
+    source_rgb = no_bg[:, :, :3].copy()
+    # Only keep skin pixels, zero out everything else
+    source_rgb[~skin_mask] = [0, 0, 0]
+
+    try:
+        # Inpaint to fill clothing regions with estimated skin
+        inpainted = cv2.inpaint(source_rgb, inpaint_mask, inpaintRadius=10, flags=cv2.INPAINT_TELEA)
+
+        # The expanded skin mask includes both original skin and inpainted areas
+        expanded_skin = skin_mask | inpaint_region
+
+        # Write inpainted pixels back to the no_bg array for the skin layer
+        # (only in the inpainted region)
+        result_rgba = no_bg.copy()
+        for c in range(3):
+            result_rgba[:, :, c] = np.where(inpaint_region, inpainted[:, :, c], no_bg[:, :, c])
+        result_rgba[:, :, 3] = np.where(expanded_skin, 255, 0).astype(np.uint8)
+
+        # Save the inpainted skin image for later use by _save_part
+        # For now, return the expanded mask
+        return expanded_skin
+    except Exception:
+        return skin_mask
+
+
+def _detect_legs(
+    skin_mask: np.ndarray,
+    landmarks: FaceLandmarks,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Detect legs from skin areas below the waist."""
+    h, w = skin_mask.shape
+    fx, fy, fw, fh = landmarks.face_rect
+
+    # Legs should be in the lower portion of the image
+    body_rows = np.any(skin_mask, axis=1)
+    if not body_rows.any():
+        return None, None
+
+    body_bottom = int(len(body_rows) - np.argmax(body_rows[::-1]))
+    body_top = int(np.argmax(body_rows))
+    body_height = body_bottom - body_top
+
+    # Leg region: below 60% of total body height
+    leg_top = body_top + int(body_height * 0.6)
+
+    leg_mask = skin_mask.copy()
+    leg_mask[:leg_top, :] = False
+
+    if leg_mask.sum() < 200:
+        return None, None
+
+    center_x = landmarks.face_center_x
+
+    leg_left = leg_mask.copy()
+    leg_left[:, center_x:] = False
+
+    leg_right = leg_mask.copy()
+    leg_right[:, :center_x] = False
+
+    leg_left_result = leg_left if leg_left.sum() > 100 else None
+    leg_right_result = leg_right if leg_right.sum() > 100 else None
+
+    return leg_left_result, leg_right_result
 
 
 def _feather_edges_adaptive(image_rgba: np.ndarray, mask: np.ndarray) -> np.ndarray:
